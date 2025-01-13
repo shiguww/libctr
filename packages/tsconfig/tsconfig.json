@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "strict": true,
+    "module": "es2020",
+    "target": "es2020",
+    "skipLibCheck": true,
+    "noUnusedLocals": true,
+    "moduleDetection": "force",
+    "noUnusedParameters": true,
+    "moduleResolution": "bundler",
+    "noUncheckedIndexedAccess": true,
+    "noFallthroughCasesInSwitch": true,
+    "useUnknownInCatchVariables": true
+  }
+}

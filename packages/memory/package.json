@@ -1,0 +1,38 @@
+{
+  "devDependencies": {
+    "tsup": "catalog:",
+    "typescript": "catalog:",
+    "@types/pngjs": "^6.0.5",
+    "@libctr/tsconfig": "workspace:^"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist/index.js",
+    "dist/index.cjs",
+    "dist/index.d.ts"
+  ],
+  "license": "MPL-2.0",
+  "main": "dist/index.cjs",
+  "name": "@libctr/memory",
+  "peerDependencies": {
+    "@libctr/error": "workspace:^"
+  },
+  "repository": {
+    "type": "git",
+    "directory": "packages/memory",
+    "url": "git+https://github.com/shiguww/libctr.git"
+  },
+  "scripts": {
+    "prepack": "pnpm build",
+    "build": "tsup index.ts --dts --format cjs,esm"
+  },
+  "type": "module",
+  "types": "dist/index.d.ts",
+  "version": "0.0.0"
+}

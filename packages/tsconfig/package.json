@@ -1,0 +1,13 @@
+{
+  "files": [
+    "tsconfig.json"
+  ],
+  "license": "MPL-2.0",
+  "name": "@libctr/tsconfig",
+  "repository": {
+    "type": "git",
+    "directory": "packages/tsconfig",
+    "url": "git+https://github.com/shiguww/libctr.git"
+  },
+  "version": "0.0.0"
+}
