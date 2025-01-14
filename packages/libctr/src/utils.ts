@@ -42,8 +42,8 @@ abstract class CTRBinarySerializable<
     return this;
   }
 
-  public validate<T>(state: T): T extends S ? null : Error {
-    return <T extends S ? null : Error>this._validate(state);
+  public validate<T>(state: T): null | Error {
+    return this._validate(state);
   }
 
   protected abstract _build(buffer: CTRMemory, ctx: BC, options?: BO): void;
