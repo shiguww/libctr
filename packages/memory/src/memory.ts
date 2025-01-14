@@ -368,8 +368,8 @@ class CTRMemory {
 
   private _used: boolean;
   private _size: number;
-  private _memory: Buffer;
   private _offset: number;
+  private _memory: Buffer;
   private _lastread: number;
   private _allocated: boolean;
   private _lastwritten: number;
@@ -487,7 +487,8 @@ class CTRMemory {
   }
 
   public get buffer(): Buffer {
-    return this._buffer.subarray(0, this.length);
+    this._lazyalloc();
+    return this._memory.subarray(0, this.length);
   }
 
   public get length(): number {
@@ -566,10 +567,11 @@ class CTRMemory {
       throw new CTRMemoryUsedError();
     }
 
-    return this._buffer.subarray(0, this.length).values();
+    return this.buffer.values();
   }
 
   public get capacity(): number {
+    this._lazyalloc();
     return this._memory.length;
   }
 
@@ -639,11 +641,6 @@ class CTRMemory {
     }
 
     return this._lastwritten;
-  }
-
-  private get _buffer(): Buffer {
-    this._lazyalloc();
-    return this._memory;
   }
 
   public at<T>(offset: number, fn: (buf: this) => T): T;
@@ -1302,7 +1299,7 @@ class CTRMemory {
   }
 
   public with<T>(fn: (buf: Buffer) => T): T {
-    return fn(this._buffer);
+    return fn(this.buffer);
   }
 
   public clone(): CTRMemory {
@@ -1321,16 +1318,17 @@ class CTRMemory {
     }
 
     return new CTRMemory(
-      Buffer.from(this._buffer.subarray(start, end)),
+      Buffer.from(this.buffer.subarray(start, end)),
       options
     );
   }
 
   public steal(): Buffer {
     this.trim();
-    const buffer = this._buffer;
 
+    const buffer = this.buffer;
     this.deallocate();
+
     return buffer;
   }
 
@@ -1493,7 +1491,7 @@ class CTRMemory {
       });
     }
 
-    const read = this._buffer.readInt8(this._offset);
+    const read = this.buffer.readInt8(this._offset);
 
     this._lastread = CTR_MEMORY_I8_SIZE;
     this._offset += this._lastread;
@@ -1521,7 +1519,7 @@ class CTRMemory {
       });
     }
 
-    const read = this._buffer.readUInt8(this._offset);
+    const read = this.buffer.readUInt8(this._offset);
 
     this._lastread = CTR_MEMORY_U8_SIZE;
     this._offset += this._lastread;
@@ -1568,7 +1566,7 @@ class CTRMemory {
   ): -1 | 0 | 1 {
     other = new CTRMemory(other, encoding).steal();
 
-    return this._buffer.compare(
+    return this.buffer.compare(
       other,
       targetStart,
       targetEnd,
@@ -1637,8 +1635,8 @@ class CTRMemory {
 
     const read =
       endianness === "BE"
-        ? this._buffer.readInt16BE(this._offset)
-        : this._buffer.readInt16LE(this._offset);
+        ? this.buffer.readInt16BE(this._offset)
+        : this.buffer.readInt16LE(this._offset);
 
     this._lastread = CTR_MEMORY_I16_SIZE;
     this._offset += this._lastread;
@@ -1676,7 +1674,7 @@ class CTRMemory {
       });
     }
 
-    const subarray = this._buffer.subarray(
+    const subarray = this.buffer.subarray(
       this._offset,
       this._offset +
         Math.min(
@@ -1726,8 +1724,8 @@ class CTRMemory {
 
     const read =
       endianness === "BE"
-        ? this._buffer.readUInt16BE(this._offset)
-        : this._buffer.readUInt16LE(this._offset);
+        ? this.buffer.readUInt16BE(this._offset)
+        : this.buffer.readUInt16LE(this._offset);
 
     this._lastread = CTR_MEMORY_U16_SIZE;
     this._offset += this._lastread;
@@ -1760,8 +1758,8 @@ class CTRMemory {
 
     const read =
       endianness === "BE"
-        ? this._buffer.readIntBE(this._offset, 3)
-        : this._buffer.readIntLE(this._offset, 3);
+        ? this.buffer.readIntBE(this._offset, 3)
+        : this.buffer.readIntLE(this._offset, 3);
 
     this._lastread = CTR_MEMORY_I24_SIZE;
     this._offset += this._lastread;
@@ -1794,8 +1792,8 @@ class CTRMemory {
 
     const read =
       endianness === "BE"
-        ? this._buffer.readUIntBE(this._offset, 3)
-        : this._buffer.readUIntLE(this._offset, 3);
+        ? this.buffer.readUIntBE(this._offset, 3)
+        : this.buffer.readUIntLE(this._offset, 3);
 
     this._lastread = CTR_MEMORY_U24_SIZE;
     this._offset += this._lastread;
@@ -1828,8 +1826,8 @@ class CTRMemory {
 
     const read =
       endianness === "BE"
-        ? this._buffer.readFloatBE(this._offset)
-        : this._buffer.readFloatLE(this._offset);
+        ? this.buffer.readFloatBE(this._offset)
+        : this.buffer.readFloatLE(this._offset);
 
     this._lastread = CTR_MEMORY_F32_SIZE;
     this._offset += this._lastread;
@@ -1862,8 +1860,8 @@ class CTRMemory {
 
     const read =
       endianness === "BE"
-        ? this._buffer.readInt32BE(this._offset)
-        : this._buffer.readInt32LE(this._offset);
+        ? this.buffer.readInt32BE(this._offset)
+        : this.buffer.readInt32LE(this._offset);
 
     this._lastread = CTR_MEMORY_I32_SIZE;
     this._offset += this._lastread;
@@ -1896,8 +1894,8 @@ class CTRMemory {
 
     const read =
       endianness === "BE"
-        ? this._buffer.readUInt32BE(this._offset)
-        : this._buffer.readUInt32LE(this._offset);
+        ? this.buffer.readUInt32BE(this._offset)
+        : this.buffer.readUInt32LE(this._offset);
 
     this._lastread = CTR_MEMORY_U32_SIZE;
     this._offset += this._lastread;
@@ -1930,8 +1928,8 @@ class CTRMemory {
 
     const read =
       endianness === "BE"
-        ? this._buffer.readIntBE(this._offset, 5)
-        : this._buffer.readIntLE(this._offset, 5);
+        ? this.buffer.readIntBE(this._offset, 5)
+        : this.buffer.readIntLE(this._offset, 5);
 
     this._lastread = CTR_MEMORY_I40_SIZE;
     this._offset += this._lastread;
@@ -1964,8 +1962,8 @@ class CTRMemory {
 
     const read =
       endianness === "BE"
-        ? this._buffer.readUIntBE(this._offset, 5)
-        : this._buffer.readUIntLE(this._offset, 5);
+        ? this.buffer.readUIntBE(this._offset, 5)
+        : this.buffer.readUIntLE(this._offset, 5);
 
     this._lastread = CTR_MEMORY_U40_SIZE;
     this._offset += this._lastread;
@@ -1998,8 +1996,8 @@ class CTRMemory {
 
     const read =
       endianness === "BE"
-        ? this._buffer.readIntBE(this._offset, 3)
-        : this._buffer.readIntLE(this._offset, 3);
+        ? this.buffer.readIntBE(this._offset, 3)
+        : this.buffer.readIntLE(this._offset, 3);
 
     this._lastread = CTR_MEMORY_I48_SIZE;
     this._offset += this._lastread;
@@ -2032,8 +2030,8 @@ class CTRMemory {
 
     const read =
       endianness === "BE"
-        ? this._buffer.readUIntBE(this._offset, 6)
-        : this._buffer.readUIntLE(this._offset, 6);
+        ? this.buffer.readUIntBE(this._offset, 6)
+        : this.buffer.readUIntLE(this._offset, 6);
 
     this._lastread = CTR_MEMORY_U48_SIZE;
     this._offset += this._lastread;
@@ -2066,8 +2064,8 @@ class CTRMemory {
 
     const read =
       endianness === "BE"
-        ? this._buffer.readFloatBE(this._offset)
-        : this._buffer.readFloatLE(this._offset);
+        ? this.buffer.readFloatBE(this._offset)
+        : this.buffer.readFloatLE(this._offset);
 
     this._lastread = CTR_MEMORY_F64_SIZE;
     this._offset += this._lastread;
@@ -2100,8 +2098,8 @@ class CTRMemory {
 
     const read =
       endianness === "BE"
-        ? this._buffer.readBigInt64BE(this._offset)
-        : this._buffer.readBigInt64LE(this._offset);
+        ? this.buffer.readBigInt64BE(this._offset)
+        : this.buffer.readBigInt64LE(this._offset);
 
     this._lastread = CTR_MEMORY_I64_SIZE;
     this._offset += this._lastread;
@@ -2134,8 +2132,8 @@ class CTRMemory {
 
     const read =
       endianness === "BE"
-        ? this._buffer.readBigUInt64BE(this._offset)
-        : this._buffer.readBigUInt64LE(this._offset);
+        ? this.buffer.readBigUInt64BE(this._offset)
+        : this.buffer.readBigUInt64LE(this._offset);
 
     this._lastread = CTR_MEMORY_U64_SIZE;
     this._offset += this._lastread;
@@ -2144,7 +2142,10 @@ class CTRMemory {
   }
 
   public reverse(): this {
-    this._memory = this._buffer.reverse();
+    this._lazyalloc();
+    this.trim();
+
+    this._memory = this._memory.reverse();
     return this;
   }
 
@@ -2179,7 +2180,7 @@ class CTRMemory {
       this._grow(this._offset + CTR_MEMORY_I8_SIZE);
     }
 
-    this._buffer.writeInt8(value, this._offset);
+    this._memory.writeInt8(value, this._offset);
     this._lastwritten = CTR_MEMORY_I8_SIZE;
 
     if (this._offset + this._lastwritten > this._size) {
@@ -2226,7 +2227,7 @@ class CTRMemory {
       end = this.length;
     }
 
-    const subarray = this._buffer.subarray(start, end);
+    const subarray = this.buffer.subarray(start, end);
 
     const other = new CTRMemory({
       ...this._options,
@@ -2274,7 +2275,7 @@ class CTRMemory {
       this._grow(this._offset + CTR_MEMORY_U8_SIZE);
     }
 
-    this._buffer.writeUInt8(value, this._offset);
+    this._memory.writeUInt8(value, this._offset);
 
     this._lastwritten = CTR_MEMORY_U8_SIZE;
 
@@ -2295,7 +2296,7 @@ class CTRMemory {
 
     return _decode(
       this,
-      this._buffer.subarray(start, end),
+      this.buffer.subarray(start, end),
       encoding,
       this.endianness
     );
@@ -2360,8 +2361,8 @@ class CTRMemory {
     }
 
     (options?.endianness || this._options.endianness) === "BE"
-      ? this._buffer.writeInt16BE(value, this._offset)
-      : this._buffer.writeInt16LE(value, this._offset);
+      ? this._memory.writeInt16BE(value, this._offset)
+      : this._memory.writeInt16LE(value, this._offset);
 
     this._lastwritten = CTR_MEMORY_I16_SIZE;
 
@@ -2416,7 +2417,7 @@ class CTRMemory {
       }
     }
 
-    this._lastwritten = subarray.copy(this._buffer, this._offset);
+    this._lastwritten = subarray.copy(this._memory, this._offset);
 
     if (this._offset + subarray.length > this._size) {
       this._size = this._offset + subarray.length;
@@ -2447,7 +2448,7 @@ class CTRMemory {
         }
       }
 
-      this._buffer.fill(
+      this._memory.fill(
         _source(this, padding, encoding, this.endianness),
         this._offset,
         this._offset + size
@@ -2505,8 +2506,8 @@ class CTRMemory {
     }
 
     (options?.endianness || this._options.endianness) === "BE"
-      ? this._buffer.writeUInt16BE(value, this._offset)
-      : this._buffer.writeUInt16LE(value, this._offset);
+      ? this._memory.writeUInt16BE(value, this._offset)
+      : this._memory.writeUInt16LE(value, this._offset);
 
     this._lastwritten = CTR_MEMORY_U16_SIZE;
 
@@ -2550,8 +2551,8 @@ class CTRMemory {
     }
 
     (options?.endianness || this._options.endianness) === "BE"
-      ? this._buffer.writeIntBE(value, this._offset, 3)
-      : this._buffer.writeIntLE(value, this._offset, 3);
+      ? this._memory.writeIntBE(value, this._offset, 3)
+      : this._memory.writeIntLE(value, this._offset, 3);
 
     this._lastwritten = CTR_MEMORY_I24_SIZE;
 
@@ -2595,8 +2596,8 @@ class CTRMemory {
     }
 
     (options?.endianness || this._options.endianness) === "BE"
-      ? this._buffer.writeUIntBE(value, this._offset, 3)
-      : this._buffer.writeUIntLE(value, this._offset, 3);
+      ? this._memory.writeUIntBE(value, this._offset, 3)
+      : this._memory.writeUIntLE(value, this._offset, 3);
 
     this._lastwritten = CTR_MEMORY_U24_SIZE;
 
@@ -2631,8 +2632,8 @@ class CTRMemory {
     }
 
     (options?.endianness || this._options.endianness) === "BE"
-      ? this._buffer.writeFloatBE(value, this._offset)
-      : this._buffer.writeFloatLE(value, this._offset);
+      ? this._memory.writeFloatBE(value, this._offset)
+      : this._memory.writeFloatLE(value, this._offset);
 
     this._lastwritten = CTR_MEMORY_F32_SIZE;
 
@@ -2676,8 +2677,8 @@ class CTRMemory {
     }
 
     (options?.endianness || this._options.endianness) === "BE"
-      ? this._buffer.writeInt32BE(value, this._offset)
-      : this._buffer.writeInt32LE(value, this._offset);
+      ? this._memory.writeInt32BE(value, this._offset)
+      : this._memory.writeInt32LE(value, this._offset);
 
     this._lastwritten = CTR_MEMORY_I32_SIZE;
 
@@ -2721,8 +2722,8 @@ class CTRMemory {
     }
 
     (options?.endianness || this._options.endianness) === "BE"
-      ? this._buffer.writeUInt32BE(value, this._offset)
-      : this._buffer.writeUInt32LE(value, this._offset);
+      ? this._memory.writeUInt32BE(value, this._offset)
+      : this._memory.writeUInt32LE(value, this._offset);
 
     this._lastwritten = CTR_MEMORY_U32_SIZE;
 
@@ -2766,8 +2767,8 @@ class CTRMemory {
     }
 
     (options?.endianness || this._options.endianness) === "BE"
-      ? this._buffer.writeIntBE(value, this._offset, 5)
-      : this._buffer.writeIntLE(value, this._offset, 5);
+      ? this._memory.writeIntBE(value, this._offset, 5)
+      : this._memory.writeIntLE(value, this._offset, 5);
 
     this._lastwritten = CTR_MEMORY_I40_SIZE;
 
@@ -2811,8 +2812,8 @@ class CTRMemory {
     }
 
     (options?.endianness || this._options.endianness) === "BE"
-      ? this._buffer.writeUIntBE(value, this._offset, 5)
-      : this._buffer.writeUIntLE(value, this._offset, 5);
+      ? this._memory.writeUIntBE(value, this._offset, 5)
+      : this._memory.writeUIntLE(value, this._offset, 5);
 
     this._lastwritten = CTR_MEMORY_U40_SIZE;
 
@@ -2856,8 +2857,8 @@ class CTRMemory {
     }
 
     (options?.endianness || this._options.endianness) === "BE"
-      ? this._buffer.writeIntBE(value, this._offset, 6)
-      : this._buffer.writeIntLE(value, this._offset, 6);
+      ? this._memory.writeIntBE(value, this._offset, 6)
+      : this._memory.writeIntLE(value, this._offset, 6);
 
     this._lastwritten = CTR_MEMORY_I48_SIZE;
 
@@ -2901,8 +2902,8 @@ class CTRMemory {
     }
 
     (options?.endianness || this._options.endianness) === "BE"
-      ? this._buffer.writeUIntBE(value, this._offset, 6)
-      : this._buffer.writeUIntLE(value, this._offset, 6);
+      ? this._memory.writeUIntBE(value, this._offset, 6)
+      : this._memory.writeUIntLE(value, this._offset, 6);
 
     this._lastwritten = CTR_MEMORY_U48_SIZE;
 
@@ -2937,8 +2938,8 @@ class CTRMemory {
     }
 
     (options?.endianness || this._options.endianness) === "BE"
-      ? this._buffer.writeFloatBE(value, this._offset)
-      : this._buffer.writeFloatLE(value, this._offset);
+      ? this._memory.writeFloatBE(value, this._offset)
+      : this._memory.writeFloatLE(value, this._offset);
 
     this._lastwritten = CTR_MEMORY_F64_SIZE;
 
@@ -2985,8 +2986,8 @@ class CTRMemory {
     }
 
     (options?.endianness || this._options.endianness) === "BE"
-      ? this._buffer.writeBigInt64BE(BigInt(value), this._offset)
-      : this._buffer.writeBigInt64LE(BigInt(value), this._offset);
+      ? this._memory.writeBigInt64BE(BigInt(value), this._offset)
+      : this._memory.writeBigInt64LE(BigInt(value), this._offset);
 
     this._lastwritten = CTR_MEMORY_I64_SIZE;
 
@@ -3033,8 +3034,8 @@ class CTRMemory {
     }
 
     (options?.endianness || this._options.endianness) === "BE"
-      ? this._buffer.writeBigUInt64BE(BigInt(value), this._offset)
-      : this._buffer.writeBigUInt64LE(BigInt(value), this._offset);
+      ? this._memory.writeBigUInt64BE(BigInt(value), this._offset)
+      : this._memory.writeBigUInt64LE(BigInt(value), this._offset);
 
     this._lastwritten = CTR_MEMORY_U64_SIZE;
 
@@ -3123,7 +3124,7 @@ class CTRMemory {
         const end =
           this._offset + Math.min(limit, chunks, this.capacity - this._offset);
 
-        const subarray = this._buffer.subarray(this._offset, end);
+        const subarray = this._memory.subarray(this._offset, end);
         const chunk = _decode(this, subarray, encoding, endianness);
         const terminatorIndex = chunk.indexOf(terminator);
 
@@ -3145,7 +3146,7 @@ class CTRMemory {
         this._offset += subarray.length;
       }
     } else {
-      const subarray = this._buffer.subarray(
+      const subarray = this._memory.subarray(
         this._offset,
         this._offset + Math.min(count, limit)
       );
@@ -3255,7 +3256,7 @@ class CTRMemory {
       }
     }
 
-    this._lastwritten = subarray.copy(this._buffer, this._offset);
+    this._lastwritten = subarray.copy(this._memory, this._offset);
 
     if (this._offset + subarray.length > this._size) {
       this._size = this._offset + subarray.length;
@@ -3264,7 +3265,7 @@ class CTRMemory {
     this._offset += this._lastwritten;
 
     if (terminator !== undefined) {
-      this._lastwritten += terminator.copy(this._buffer, this._offset);
+      this._lastwritten += terminator.copy(this._memory, this._offset);
 
       if (this._offset + terminator.length > this._size) {
         this._size = this._offset + terminator.length;
@@ -3296,7 +3297,7 @@ class CTRMemory {
         }
       }
 
-      this._buffer.fill(
+      this._memory.fill(
         _source(this, padding, encoding, endianness),
         this._offset,
         this._offset + size
@@ -3388,10 +3389,10 @@ class CTRMemory {
 
       this._lazyalloc();
 
-      this._buffer.fill(
+      this._memory.fill(
         buffer,
         0,
-        Math.min(buffer.length, this._buffer.length)
+        Math.min(buffer.length, this._memory.length)
       );
     }
 
@@ -3414,34 +3415,33 @@ class CTRMemory {
     return this;
   }
 
-  private _lazyalloc(): void {
+  private _lazyalloc(): Buffer {
     if (this._used) {
       throw new CTRMemoryUsedError();
     }
 
-    if (!this._allocated && this._lazyoptions !== null) {
-      this._reallocate(this._lazyoptions.size || 0);
-
-      const fill = this._lazyoptions.fill;
+    if (!this._allocated) {
+      this._reallocate(this._lazyoptions?.size || 0);
+      const fill = this._lazyoptions?.fill;
 
       if (fill !== undefined) {
-        this._buffer.fill(
+        this._memory.fill(
           _source(this, fill, this._options.encoding, this.endianness)
         );
       }
 
-      this._size = this._lazyoptions.size || 0;
+      this._size = this._lazyoptions?.size || 0;
       this._lazyoptions = null;
       this._allocated = true;
     }
+
+    return this._memory;
   }
 
   private _reallocate(size: number): void {
     if (this._used) {
       throw new CTRMemoryUsedError();
     }
-
-    let other: Buffer;
 
     if (!Number.isInteger(size)) {
       throw new CTRMemoryOutOfRangeError(
@@ -3466,7 +3466,10 @@ class CTRMemory {
     }
 
     try {
-      other = Buffer.allocUnsafe(size);
+      const other = Buffer.allocUnsafe(size);
+
+      this._memory.copy(other);
+      this._memory = other;
     } catch (err) {
       throw new CTRMemoryError(
         CTRMemoryError.ERR_OUT_OF_MEMORY,
@@ -3475,9 +3478,6 @@ class CTRMemory {
         err
       );
     }
-
-    this._memory.copy(other);
-    this._memory = other;
   }
 }
 
