@@ -1,6 +1,6 @@
 import { CTRMemory } from "@libctr/memory";
+import { CTRBinarySerializable } from "#utils";
 import type { CTRMemoryArray } from "@libctr/memory";
-import { CTRBinarySerializable } from "#utils/binary-serializable";
 import { CTRVersionInvalidSpecifierError } from "#version/version-error";
 
 const CTR_VERSION_SPECIFIER_REGEXP =

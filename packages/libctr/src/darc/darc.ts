@@ -1,18 +1,17 @@
 import { CTRMemory } from "@libctr/memory";
 import type { CTRVFSNode } from "#vfs/vfs";
 import { CTRVersion } from "#version/version";
+import { CTRBinarySerializable } from "#utils";
 import { CTRMemoryOOBError } from "@libctr/memory";
 import type { CTRMemoryEndianness } from "@libctr/memory";
 import { CTRVFS, CTRVFSDirectory, CTRVFSFile } from "#vfs/vfs";
-import { CTRBinarySerializable } from "#utils/binary-serializable";
+import type { CTREventEmitterDefaultEventMap } from "#event-emitter/event-emitter";
 
 import {
   CTRDARCError,
   CTRDARCInvalidStateError,
   CTRDARCUnsupportedVersionError
 } from "#darc/darc-error";
-
-import type { CTREventEmitterDefaultEventMap } from "#event-emitter/event-emitter";
 
 interface CTRDARCVFSFileAttributes {
   padding?: number;

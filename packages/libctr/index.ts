@@ -24,5 +24,5 @@ export * from "#rom/rom";
 export * from "#rom/rom-error";
 export * as rom from "#rom/index";
 
-export * from "#utils/binary-serializable";
-export * as util from "#utils/index";
+export * from "#utils";
+export * as util from "#utils";

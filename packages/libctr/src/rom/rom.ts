@@ -1,7 +1,7 @@
 import path from "node:path";
 import fs from "node:fs/promises";
-import { CTRVFS, CTRVFSDirectoryListener } from "#vfs/vfs";
 import type { CTRVFSNode } from "#vfs/vfs";
+import { CTRVFS, CTRVFSDirectoryListener } from "#vfs/vfs";
 import { CTRROMUnsupportedFormatError } from "#rom/rom-error";
 import { CTREventEmitter } from "#event-emitter/event-emitter";
 import type { CTREventEmitterDefaultEventMap } from "#event-emitter/event-emitter";
