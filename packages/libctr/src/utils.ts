@@ -65,19 +65,7 @@ abstract class CTRBinarySerializable<
     return err;
   }
 
-  public build(
-    this: CTRBinarySerializable<S, E, undefined, PC, BO, PO>,
-    buffer?: CTRMemory,
-    options?: BO
-  ): CTRMemory;
-
-  public build(
-    buffer: undefined | CTRMemory,
-    options: BO | undefined,
-    ctx: BC
-  ): CTRMemory;
-
-  public build(buffer?: CTRMemory, options?: BO, ctx?: BC): CTRMemory {
+  public build(buffer?: CTRMemory, ctx?: BC, options?: BO): CTRMemory {
     if (buffer === undefined) {
       buffer = new CTRMemory();
     }
@@ -90,17 +78,8 @@ abstract class CTRBinarySerializable<
     }
   }
 
-  public parse(
-    this: CTRBinarySerializable<S, E, BC, undefined, BO, PO>,
-    buffer: CTRMemoryArray,
-    options?: PO
-  ): this;
-
-  public parse(buffer: CTRMemoryArray, options: PO | undefined, ctx: PC): this;
-
-  public parse(_buffer: CTRMemoryArray, options?: PO, ctx?: PC): this {
-    const buffer =
-      _buffer instanceof CTRMemory ? _buffer : new CTRMemory(_buffer);
+  public parse(buffer: CTRMemoryArray, ctx?: PC, options?: PO): this {
+    buffer = buffer instanceof CTRMemory ? buffer : new CTRMemory(buffer);
 
     try {
       this._parse(buffer, ctx!, options);
