@@ -9,7 +9,7 @@ import type {
 } from "#event-emitter/event-emitter";
 
 abstract class CTRBinarySerializable<
-  S = null,
+  S = never,
   E extends CTREventEmitterEventMap = CTREventEmitterDefaultEventMap,
   BC = undefined,
   PC = BC,
@@ -21,19 +21,41 @@ abstract class CTRBinarySerializable<
   }
 
   public get(): S {
-    return this._validate(this._get());
+    const state = this._get();
+    const err = this.validate(state);
+
+    if (err !== null) {
+      throw err;
+    }
+
+    return state;
   }
 
   public set(state: S): this {
-    this._set(this._validate(state));
+    const err = this._validate(state);
+
+    if (err !== null) {
+      throw err;
+    }
+
+    this._set(state);
     return this;
   }
 
-  protected abstract _get(): S;
-  protected abstract _set(state: S): void;
-  protected abstract _validate(state: unknown): S;
+  public validate<T>(state: T): T extends S ? null : Error {
+    return <T extends S ? null : Error>this._validate(state);
+  }
+
   protected abstract _build(buffer: CTRMemory, ctx: BC, options?: BO): void;
   protected abstract _parse(buffer: CTRMemory, ctx: PC, options?: PO): void;
+
+  protected _get(): S {
+    throw new CTRError("ctr.not_implemented", null);
+  }
+
+  protected _set(state: S): void {
+    throw new CTRError("ctr.not_implemented", { state });
+  }
 
   protected _sizeof(): number {
     throw new CTRError("ctr.not_implemented", null);
@@ -44,12 +66,12 @@ abstract class CTRBinarySerializable<
     buffer: CTRMemory,
     ctx: BC,
     options?: BO
-  ): unknown {
-    ctx;
-    buffer;
-    options;
+  ): Error {
+    if (err instanceof Error) {
+      return err;
+    }
 
-    return err;
+    return new CTRError("ctr.unknown", { ctx, buffer, options });
   }
 
   protected _parseerr(
@@ -57,12 +79,16 @@ abstract class CTRBinarySerializable<
     buffer: CTRMemory,
     ctx: PC,
     options?: PO
-  ): unknown {
-    ctx;
-    buffer;
-    options;
+  ): Error {
+    if (err instanceof Error) {
+      return err;
+    }
 
-    return err;
+    return new CTRError("ctr.unknown", { ctx, buffer, options });
+  }
+
+  protected _validate<T>(state: T): null | Error {
+    return new CTRError("ctr.not_implemented", { state });
   }
 
   public build(buffer?: CTRMemory, ctx?: BC, options?: BO): CTRMemory {

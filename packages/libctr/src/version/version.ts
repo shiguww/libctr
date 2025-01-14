@@ -63,15 +63,17 @@ class CTRVersion extends CTRBinarySerializable<CTRVersionSpecifier> {
     return 4 * CTRMemory.U8_SIZE;
   }
 
-  protected override _validate(specifier: unknown): CTRVersionSpecifier {
+  protected override _validate(
+    specifier: unknown
+  ): null | CTRVersionInvalidSpecifierError {
     if (
       typeof specifier !== "string" ||
       !CTR_VERSION_SPECIFIER_REGEXP.test(specifier)
     ) {
-      throw new CTRVersionInvalidSpecifierError({ specifier });
+      return new CTRVersionInvalidSpecifierError({ specifier });
     }
 
-    return <CTRVersionSpecifier>specifier;
+    return null;
   }
 
   private _init(

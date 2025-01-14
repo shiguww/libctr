@@ -330,7 +330,9 @@ class CTRDARC extends CTRBinarySerializable<
     );
   }
 
-  protected override _validate(state: unknown): CTRDARCVFS {
+  protected override _validate(
+    state: unknown
+  ): null | CTRDARCInvalidStateError {
     if (state instanceof CTRVFS) {
       for (const node of state.flatten()) {
         if (node.attributes === null) {
@@ -341,12 +343,14 @@ class CTRDARC extends CTRBinarySerializable<
           typeof node.attributes !== "object" ||
           typeof node.attributes.padding !== "number"
         ) {
-          throw new CTRDARCInvalidStateError({ state });
+          return new CTRDARCInvalidStateError({ state });
         }
       }
+
+      return null;
     }
 
-    throw new CTRDARCInvalidStateError({ state });
+    return new CTRDARCInvalidStateError({ state });
   }
 
   private _buildNode(node: CTRDARCNode, buffer: CTRMemory): void {
