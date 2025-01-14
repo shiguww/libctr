@@ -16,7 +16,13 @@ type CTRMemoryTerminator = boolean | string;
 type CTRMemorySource = number | CTRMemoryArray;
 type CTRMemoryMix<A, B> = (A & B) | (A | B) | A | B;
 type CTRMemoryDataType = (typeof CTR_MEMORY_DATA_TYPES)[number];
-type CTRMemoryArray = string | CTRMemory | number[] | Uint8Array;
+
+type CTRMemoryArray =
+  | string
+  | number[]
+  | CTRMemory
+  | Uint8Array
+  | readonly number[];
 
 type CTRMemoryEncoding =
   | "hex"
@@ -3487,7 +3493,9 @@ const _source = (
       ? source.buffer
       : typeof source === "string"
         ? _encode(buffer, source, encoding, endianness)
-        : new Uint8Array(Array.isArray(source) ? source : [source]);
+        : typeof source === "object"
+          ? new Uint8Array(source)
+          : new Uint8Array([source]);
 
 const _issource = (value: unknown): value is CTRMemorySource =>
   Array.isArray(value) ||
