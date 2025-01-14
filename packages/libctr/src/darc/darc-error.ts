@@ -4,6 +4,7 @@ import type { CTRVersion } from "#version/version";
 
 type CTRDARCErrorCode =
   | typeof CTRDARCError.ERR_UNKNOWN
+  | typeof CTRDARCError.ERR_INVALID_STATE
   | typeof CTRDARCError.ERR_INVALID_HEADER
   | typeof CTRDARCError.ERR_MALFORMED_FILE
   | typeof CTRDARCError.ERR_NOT_A_DARC_FILE
@@ -12,7 +13,8 @@ type CTRDARCErrorCode =
   | typeof CTRDARCError.ERR_ROOT_IS_NOT_A_DIRECTORY;
 
 interface CTRDARCErrorMetadata {
-  buffer: CTRMemory;
+  state?: unknown;
+  buffer?: CTRMemory;
   version?: CTRVersion;
 }
 
@@ -31,6 +33,7 @@ class CTRDARCError<
   }
 
   public static readonly ERR_UNKNOWN = "darc.err_unknown";
+  public static readonly ERR_INVALID_STATE = "darc.err_invalid_state";
   public static readonly ERR_INVALID_HEADER = "darc.err_invalid_header";
   public static readonly ERR_MALFORMED_FILE = "darc.err_malformed_file";
   public static readonly ERR_NOT_A_DARC_FILE = "darc.err_not_a_darc_file";
@@ -45,13 +48,39 @@ class CTRDARCError<
     "darc.err_root_is_not_a_directory";
 }
 
-interface CTRDARCUnsupportedVersionErrorMetadata
-  extends Required<CTRDARCErrorMetadata> {}
+interface CTRDARCInvalidStateErrorMetadata
+  extends Pick<Required<CTRDARCErrorMetadata>, "state"> {}
 
-class CTRDARCUnsupportedVersionError<
-  M extends CTRDARCUnsupportedVersionErrorMetadata
-> extends CTRDARCError<typeof CTRDARCError.ERR_UNSUPPORTED_VERSION, M> {
-  public constructor(metadata: M, message?: string, cause?: unknown) {
+class CTRDARCInvalidStateError extends CTRDARCError<
+  typeof CTRDARCError.ERR_INVALID_STATE,
+  CTRDARCInvalidStateErrorMetadata
+> {
+  public constructor(
+    metadata: CTRDARCInvalidStateErrorMetadata,
+    message?: string,
+    cause?: unknown
+  ) {
+    super(
+      CTRDARCError.ERR_INVALID_STATE,
+      metadata,
+      message || `Invalid state '${metadata.state}'`,
+      cause
+    );
+  }
+}
+
+interface CTRDARCUnsupportedVersionErrorMetadata
+  extends Pick<Required<CTRDARCErrorMetadata>, "buffer" | "version"> {}
+
+class CTRDARCUnsupportedVersionError extends CTRDARCError<
+  typeof CTRDARCError.ERR_UNSUPPORTED_VERSION,
+  CTRDARCUnsupportedVersionErrorMetadata
+> {
+  public constructor(
+    metadata: CTRDARCUnsupportedVersionErrorMetadata,
+    message?: string,
+    cause?: unknown
+  ) {
     super(
       CTRDARCError.ERR_UNSUPPORTED_VERSION,
       metadata,
@@ -64,6 +93,8 @@ class CTRDARCUnsupportedVersionError<
 export {
   CTRDARCError,
   CTRDARCError as DARCError,
+  CTRDARCInvalidStateError,
+  CTRDARCInvalidStateError as DARCInvalidStateError,
   CTRDARCUnsupportedVersionError,
   CTRDARCUnsupportedVersionError as DARCUnsupportedVersionError
 };
@@ -73,6 +104,8 @@ export type {
   CTRDARCErrorCode as DARCErrorCode,
   CTRDARCErrorMetadata,
   CTRDARCErrorMetadata as DARCErrorMetadata,
+  CTRDARCInvalidStateErrorMetadata,
+  CTRDARCInvalidStateErrorMetadata as DARCInvalidStateErrorMetadata,
   CTRDARCUnsupportedVersionErrorMetadata,
   CTRDARCUnsupportedVersionErrorMetadata as DARCUnsupportedVersionErrorMetadata
 };

@@ -450,6 +450,15 @@ class CTRVFSDirectory<
     return this._nodes[this.findIndex(predicate)];
   }
 
+  public clear(): this {
+    this.nodes.forEach(
+      (node) => ((<CTRVFSDirectory<D, F>>node)._parent = null)
+    );
+
+    this.nodes.length = 0;
+    return this;
+  }
+
   public override clone(): CTRVFSDirectory<D, F> {
     const clone = new CTRVFSDirectory<D, F>(
       this.name,

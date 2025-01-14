@@ -9,6 +9,7 @@ import type {
 } from "#event-emitter/event-emitter";
 
 abstract class CTRBinarySerializable<
+  S = null,
   E extends CTREventEmitterEventMap = CTREventEmitterDefaultEventMap,
   BC = undefined,
   PC = BC,
@@ -19,6 +20,18 @@ abstract class CTRBinarySerializable<
     return this._sizeof();
   }
 
+  public get(): S {
+    return this._validate(this._get());
+  }
+
+  public set(state: S): this {
+    this._set(this._validate(state));
+    return this;
+  }
+
+  protected abstract _get(): S;
+  protected abstract _set(state: S): void;
+  protected abstract _validate(state: unknown): S;
   protected abstract _build(buffer: CTRMemory, ctx: BC, options?: BO): void;
   protected abstract _parse(buffer: CTRMemory, ctx: PC, options?: PO): void;
 
@@ -36,10 +49,6 @@ abstract class CTRBinarySerializable<
     buffer;
     options;
 
-    if (err instanceof CTRError) {
-      return err;
-    }
-
     return err;
   }
 
@@ -53,15 +62,11 @@ abstract class CTRBinarySerializable<
     buffer;
     options;
 
-    if (err instanceof CTRError) {
-      return err;
-    }
-
     return err;
   }
 
   public build(
-    this: CTRBinarySerializable<E, undefined, PC, BO, PO>,
+    this: CTRBinarySerializable<S, E, undefined, PC, BO, PO>,
     buffer?: CTRMemory,
     options?: BO
   ): CTRMemory;
@@ -86,7 +91,7 @@ abstract class CTRBinarySerializable<
   }
 
   public parse(
-    this: CTRBinarySerializable<E, BC, undefined, BO, PO>,
+    this: CTRBinarySerializable<S, E, BC, undefined, BO, PO>,
     buffer: CTRMemoryArray,
     options?: PO
   ): this;

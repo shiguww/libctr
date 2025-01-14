@@ -1,4 +1,5 @@
 export { CTRVersion as Version } from "#version/version";
+export type { CTRVersionSpecifier as Specifier } from "#version/version";
 
 export {
   CTRVersionError as Error,

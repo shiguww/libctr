@@ -3,7 +3,7 @@ import { CTRError } from "@libctr/error";
 type CTRVersionErrorCode = typeof CTRVersionError.ERR_INVALID_VERSION_SPECIFIER;
 
 interface CTRVersionErrorMetadata {
-  specifier?: string;
+  specifier?: unknown;
 }
 
 class CTRVersionError<
@@ -25,7 +25,7 @@ class CTRVersionError<
 }
 
 interface CTRVersionInvalidSpecifierErrorMetadata {
-  specifier: string;
+  specifier: unknown;
 }
 
 class CTRVersionInvalidSpecifierError extends CTRVersionError<

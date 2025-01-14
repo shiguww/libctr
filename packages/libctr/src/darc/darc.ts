@@ -5,7 +5,13 @@ import { CTRMemoryOOBError } from "@libctr/memory";
 import type { CTRMemoryEndianness } from "@libctr/memory";
 import { CTRVFS, CTRVFSDirectory, CTRVFSFile } from "#vfs/vfs";
 import { CTRBinarySerializable } from "#utils/binary-serializable";
-import { CTRDARCError, CTRDARCUnsupportedVersionError } from "#darc/darc-error";
+
+import {
+  CTRDARCError,
+  CTRDARCInvalidStateError,
+  CTRDARCUnsupportedVersionError
+} from "#darc/darc-error";
+
 import type { CTREventEmitterDefaultEventMap } from "#event-emitter/event-emitter";
 
 interface CTRDARCVFSFileAttributes {
@@ -19,7 +25,6 @@ interface CTRDARCListEntry {
 }
 
 interface CTRDARCList extends Array<CTRDARCListEntry> {}
-
 type CTRDARCVFSNode = CTRVFSNode<{}, CTRDARCVFSFileAttributes>;
 
 interface CTRDARCVFS extends CTRVFS<{}, CTRDARCVFSFileAttributes> {}
@@ -49,13 +54,16 @@ interface CTRDARCHeader {
   endianness: CTRMemoryEndianness;
 }
 
+type CTRDARCState = CTRDARCVFS;
+
 class CTRDARC extends CTRBinarySerializable<
+  CTRDARCState,
   CTREventEmitterDefaultEventMap &
     Record<`parse.list`, [CTRDARCList]> &
     Record<`${"build" | "parse"}.node`, [CTRDARCNode]> &
     Record<`${"build" | "parse"}.header`, [CTRDARCHeader]>
 > {
-  private static readonly VERSION = new CTRVersion("1.0.0.0");
+  private static readonly VERSION_SPECIFIER = "1.0.0.0";
 
   private static readonly NODE_SIZE = 0xc;
   private static readonly ALIGNMENT = 0x10;
@@ -63,9 +71,17 @@ class CTRDARC extends CTRBinarySerializable<
   private static readonly HEADER_SIZE = 0x1c;
   private static readonly MAGIC = [0x64, 0x61, 0x72, 0x63];
 
-  public endianness: CTRMemoryEndianness = "LE";
-  public readonly version = new CTRVersion(CTRDARC.VERSION);
-  public readonly root: CTRDARCVFS = new CTRVFS("darc", [], {});
+  public endianness: CTRMemoryEndianness;
+  public readonly version: CTRVersion;
+  public readonly root: CTRDARCVFS;
+
+  public constructor() {
+    super();
+
+    this.endianness = "LE";
+    this.root = new CTRVFS("darc");
+    this.version = new CTRVersion(CTRDARC.VERSION_SPECIFIER);
+  }
 
   private get _nodes(): CTRDARCNode[] {
     const root = this._rootnode;
@@ -84,6 +100,18 @@ class CTRDARC extends CTRBinarySerializable<
       nameOffset: NaN,
       isDirectory: true
     };
+  }
+
+  protected override _get(): CTRDARCState {
+    return this.root;
+  }
+
+  protected override _set(root: CTRDARCState): void {
+    this.root.clear();
+
+    for (const node of root.flatten()) {
+      this.root.append(node);
+    }
   }
 
   protected override _build(buffer: CTRMemory): void {
@@ -125,8 +153,8 @@ class CTRDARC extends CTRBinarySerializable<
       tableLength,
       dataStartOffset,
       magic: CTRDARC.MAGIC,
+      version: this.version,
       fileLength: this.sizeof,
-      version: CTRDARC.VERSION,
       size: CTRDARC.HEADER_SIZE,
       endianness: this.endianness,
       tableOffset: CTRDARC.HEADER_SIZE
@@ -303,6 +331,25 @@ class CTRDARC extends CTRBinarySerializable<
     );
   }
 
+  protected override _validate(state: unknown): CTRDARCVFS {
+    if (state instanceof CTRVFS) {
+      for (const node of state.flatten()) {
+        if (node.attributes === null) {
+          continue;
+        }
+
+        if (
+          typeof node.attributes !== "object" ||
+          typeof node.attributes.padding !== "number"
+        ) {
+          throw new CTRDARCInvalidStateError({ state });
+        }
+      }
+    }
+
+    throw new CTRDARCInvalidStateError({ state });
+  }
+
   private _buildNode(node: CTRDARCNode, buffer: CTRMemory): void {
     buffer.u24(node.nameOffset);
     buffer.u8(Number(node.isDirectory));
@@ -409,7 +456,7 @@ class CTRDARC extends CTRBinarySerializable<
     const tableLength = buffer.u32();
     const dataStartOffset = buffer.u32();
 
-    if (!version.is(CTRDARC.VERSION)) {
+    if (!version.is(CTRDARC.VERSION_SPECIFIER)) {
       throw new CTRDARCUnsupportedVersionError({ buffer, version });
     }
 
@@ -421,7 +468,7 @@ class CTRDARC extends CTRBinarySerializable<
       throw new CTRDARCError(CTRDARCError.ERR_MALFORMED_FILE, { buffer });
     }
 
-    this.version.set(version);
+    this.version.set(version.toString());
     this.endianness = endianness;
 
     return {
