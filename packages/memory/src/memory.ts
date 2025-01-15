@@ -3256,22 +3256,24 @@ class CTRMemory {
       }
     }
 
-    this._lastwritten = subarray.copy(this._memory, this._offset);
+    let written = subarray.copy(this._memory, this._offset);
 
     if (this._offset + subarray.length > this._size) {
       this._size = this._offset + subarray.length;
     }
 
-    this._offset += this._lastwritten;
+    this._offset += written;
+    this._lastwritten = written;
 
     if (terminator !== undefined) {
-      this._lastwritten += terminator.copy(this._memory, this._offset);
+      written = terminator.copy(this._memory, this._offset);
 
       if (this._offset + terminator.length > this._size) {
         this._size = this._offset + terminator.length;
       }
 
-      this._offset += this._lastwritten;
+      this._offset += written;
+      this._lastwritten += written;
     }
 
     const padding =
@@ -3307,8 +3309,8 @@ class CTRMemory {
         this._size = this._offset + size;
       }
 
-      this._lastwritten += size;
       this._offset += size;
+      this._lastwritten += size;
     }
 
     if (count !== undefined && this._lastwritten !== count) {
