@@ -16,6 +16,12 @@ abstract class CTRBinarySerializable<
   BO = null,
   PO = BO
 > extends CTREventEmitter<E> {
+  private _offset: null | number = null;
+
+  public get offset(): null | number {
+    return this._offset;
+  }
+
   public get sizeof(): number {
     return this._sizeof();
   }
@@ -97,7 +103,9 @@ abstract class CTRBinarySerializable<
     }
 
     try {
+      this._offset = buffer.offset;
       this._build(buffer, ctx!, options);
+
       return buffer;
     } catch (err) {
       throw this._builderr(err, buffer, ctx!, options);
@@ -108,7 +116,9 @@ abstract class CTRBinarySerializable<
     buffer = buffer instanceof CTRMemory ? buffer : new CTRMemory(buffer);
 
     try {
+      this._offset = buffer.offset;
       this._parse(buffer, ctx!, options);
+
       return this;
     } catch (err) {
       throw this._parseerr(err, buffer, ctx!, options);
