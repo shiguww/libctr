@@ -501,6 +501,31 @@ class CTRVFSDirectory<
     return this;
   }
 
+  public search(path: string | string[]): null | CTRVFSNode<D, F> {
+    const segments = typeof path === "string" ? path.split("/") : path;
+    const name = segments[0];
+
+    if (name === undefined) {
+      return null;
+    }
+
+    for (const node of this._nodes) {
+      if (node.name === name) {
+        if (segments.length === 1) {
+          return node;
+        }
+
+        if (node.isFile()) {
+          return null;
+        }
+
+        return node.search(segments.slice(1));
+      }
+    }
+
+    return null;
+  }
+
   public override flatten(): CTRVFSNode<D, F>[] {
     return [this, ...this._nodes.map((n) => n.flatten()).flat()];
   }
