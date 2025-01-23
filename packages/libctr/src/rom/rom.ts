@@ -1,8 +1,8 @@
 import path from "node:path";
 import fs from "node:fs/promises";
 import type { CTRVFSNode } from "#vfs/vfs";
+import { CTRROMError, CTRROMUnknownFormatError } from "#rom/rom-error";
 import { CTRVFS, CTRVFSDirectoryListener } from "#vfs/vfs";
-import { CTRROMUnsupportedFormatError } from "#rom/rom-error";
 import { CTREventEmitter } from "#event-emitter/event-emitter";
 import type { CTREventEmitterDefaultEventMap } from "#event-emitter/event-emitter";
 
@@ -17,15 +17,16 @@ interface CTRReadROMOptions {
   listener?: CTRROMListener;
 }
 
-function _throwFormatError(
-  rompath: string,
-  message?: string,
-  cause?: unknown
-): never {
+function _throwFormatError(rompath: string, cause?: unknown): never {
   let format: null | string = path.extname(rompath);
-  format = format === "" ? null : format;
+  format = format === "" ? null : format.slice(1);
 
-  throw new CTRROMUnsupportedFormatError({ format }, message, cause);
+  throw new CTRROMUnknownFormatError(
+    CTRROMError.ERR_UNKNOWN_FORMAT,
+    format,
+    undefined,
+    cause
+  );
 }
 
 class CTRROMListener extends CTREventEmitter<
@@ -34,7 +35,7 @@ class CTRROMListener extends CTREventEmitter<
     Record<`${"exefs" | "romfs"}.node.${"end" | "start"}`, [CTRVFSNode]>
 > {}
 
-async function readROM(options: CTRReadROMOptions): Promise<CTRROM> {
+async function _readROM(options: CTRReadROMOptions): Promise<CTRROM> {
   let romfs: null | CTRVFS = null;
   let exefs: null | CTRVFS = null;
 
@@ -44,10 +45,10 @@ async function readROM(options: CTRReadROMOptions): Promise<CTRROM> {
   const exefsstat = typeof exefspath === "string" && (await fs.stat(exefspath));
   const romfsstat = typeof romfspath === "string" && (await fs.stat(romfspath));
 
-  if(exefsstat) {
+  if (exefsstat) {
     listener?.emit("exefs.start", null);
 
-    if(exefsstat.isDirectory()) {
+    if (exefsstat.isDirectory()) {
       exefs = await CTRVFS.fromDirectory(
         exefspath,
         "exefs",
@@ -64,7 +65,7 @@ async function readROM(options: CTRReadROMOptions): Promise<CTRROM> {
       );
     }
 
-    if(exefs === null) {
+    if (exefs === null) {
       // TODO: parse exefs and romfs from a file (ie, NCCH)
       _throwFormatError(exefspath);
     }
@@ -72,10 +73,10 @@ async function readROM(options: CTRReadROMOptions): Promise<CTRROM> {
     listener?.emit("exefs.end", null);
   }
 
-  if(romfsstat) {
+  if (romfsstat) {
     listener?.emit("romfs.start", null);
 
-    if(romfsstat.isDirectory()) {
+    if (romfsstat.isDirectory()) {
       romfs = await CTRVFS.fromDirectory(
         romfspath,
         "romfs",
@@ -92,7 +93,7 @@ async function readROM(options: CTRReadROMOptions): Promise<CTRROM> {
       );
     }
 
-    if(romfs === null) {
+    if (romfs === null) {
       // TODO: parse exefs and romfs from a file (ie, NCCH)
       _throwFormatError(romfspath);
     }
@@ -101,6 +102,14 @@ async function readROM(options: CTRReadROMOptions): Promise<CTRROM> {
   }
 
   return { exefs, romfs };
+}
+
+async function readROM(options: CTRReadROMOptions): Promise<CTRROM> {
+  try {
+    return await _readROM(options);
+  } catch (err) {
+    throw new CTRROMError(CTRROMError.ERR_READ, undefined, err);
+  }
 }
 
 async function readEXEFS(

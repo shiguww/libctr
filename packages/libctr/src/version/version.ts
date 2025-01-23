@@ -1,14 +1,23 @@
 import { CTRMemory } from "@libctr/memory";
 import { CTRBinarySerializable } from "#utils";
 import type { CTRMemoryArray } from "@libctr/memory";
-import { CTRVersionInvalidSpecifierError } from "#version/version-error";
+import { CTRVersionError } from "#version/version-error";
+import type { CTREventEmitterEventMap } from "#event-emitter/event-emitter";
 
 const CTR_VERSION_SPECIFIER_REGEXP =
   /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 
 type CTRVersionSpecifier = `${number}.${number}.${number}.${number}`;
 
-class CTRVersion extends CTRBinarySerializable<CTRVersionSpecifier> {
+class CTRVersion extends CTRBinarySerializable<
+  CTRVersionSpecifier,
+  CTREventEmitterEventMap,
+  undefined,
+  undefined,
+  Error,
+  Error,
+  CTRVersionError
+> {
   public major: number = 0;
   public micro: number = 0;
   public minor: number = 0;
@@ -63,14 +72,15 @@ class CTRVersion extends CTRBinarySerializable<CTRVersionSpecifier> {
     return 4 * CTRMemory.U8_SIZE;
   }
 
-  protected override _validate(
-    specifier: unknown
-  ): null | CTRVersionInvalidSpecifierError {
+  protected override _validate(specifier: unknown): null | CTRVersionError {
     if (
       typeof specifier !== "string" ||
       !CTR_VERSION_SPECIFIER_REGEXP.test(specifier)
     ) {
-      return new CTRVersionInvalidSpecifierError({ specifier });
+      return new CTRVersionError(
+        CTRVersionError.ERR_INVALID_VERSION_SPECIFIER,
+        specifier
+      );
     }
 
     return null;

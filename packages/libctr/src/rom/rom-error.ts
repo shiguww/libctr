@@ -1,46 +1,48 @@
 import { CTRError } from "@libctr/error";
 
-type CTRROMErrorCode = typeof CTRROMError.ERR_UNSUPPORTED_FORMAT;
+type CTRROMErrorCode =
+  | typeof CTRROMError.ERR_READ
+  | typeof CTRROMError.ERR_UNKNOWN_FORMAT;
 
-interface CTRROMErrorMetadata {
-  format: null | string;
+class CTRROMError extends CTRError {
+  public static readonly ERR_READ = "rom.err_read";
+  public static readonly ERR_UNKNOWN_FORMAT = "rom.err_unknown_format";
+
+  public constructor(code: CTRROMErrorCode, message?: string, cause?: unknown) {
+    super(code, message, cause);
+  }
 }
 
-class CTRROMError<
-  C extends CTRROMErrorCode,
-  M extends CTRROMErrorMetadata
-> extends CTRError<C, M> {
-  public static readonly ERR_UNSUPPORTED_FORMAT = "rom.err_unsupported_format";
-}
+class CTRROMUnknownFormatError extends CTRError {
+  private static _makeMessage(
+    message: string | undefined,
+    format: null | string
+  ): string {
+    if (message !== undefined) {
+      return message;
+    }
 
-interface CTRROMUnsupportedFormatErrorMetadata
-  extends Pick<CTRROMErrorMetadata, "format"> {}
+    return `unsupported format '${format}'`;
+  }
 
-class CTRROMUnsupportedFormatError extends CTRROMError<
-  typeof CTRROMError.ERR_UNSUPPORTED_FORMAT,
-  CTRROMUnsupportedFormatErrorMetadata
-> {
+  public readonly format: null | string;
+
   public constructor(
-    metadata: CTRROMUnsupportedFormatErrorMetadata,
+    code: CTRROMErrorCode,
+    format: null | string,
     message?: string,
     cause?: unknown
   ) {
-    super(CTRROMError.ERR_UNSUPPORTED_FORMAT, metadata, message, cause);
+    super(code, CTRROMUnknownFormatError._makeMessage(message, format), cause);
+    this.format = format;
   }
 }
 
 export {
   CTRROMError,
   CTRROMError as ROMError,
-  CTRROMUnsupportedFormatError,
-  CTRROMUnsupportedFormatError as ROMUnsupportedFormatError
+  CTRROMUnknownFormatError,
+  CTRROMUnknownFormatError as ROMUnknownFormatError
 };
 
-export type {
-  CTRROMErrorCode,
-  CTRROMErrorCode as ROMErrorCode,
-  CTRROMErrorMetadata,
-  CTRROMErrorMetadata as ROMErrorMetadata,
-  CTRROMUnsupportedFormatErrorMetadata,
-  CTRROMUnsupportedFormatErrorMetadata as ROMUnsupportedFormatErrorMetadata
-};
+export type { CTRROMErrorCode, CTRROMErrorCode as ROMErrorCode };

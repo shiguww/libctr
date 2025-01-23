@@ -1,5 +1,5 @@
 import { constants } from "node:buffer";
-const { MAX_LENGTH } = constants;
+import type { CTRMemoryAction, CTRMemoryRange } from "#memory-error";
 
 import {
   CTRMemoryError,
@@ -7,7 +7,11 @@ import {
   CTRMemoryUsedError,
   CTRMemoryCountFailError,
   CTRMemoryOutOfRangeError,
-  CTRMemoryUnsupportedEncodingError
+  CTRMemoryUnknownTypeError,
+  CTRMemoryUnknownBOMMarkError,
+  CTRMemoryUnknownEncodingError,
+  CTRMemoryInvalidOperationError,
+  CTRMemoryUnknownEndiannessError
 } from "#memory-error";
 
 type CTRMemoryEndianness = "BE" | "LE";
@@ -100,15 +104,17 @@ interface CTRMemoryStringWriteOptions extends CTRMemoryRawWriteOptions {
 
 interface CTRMemoryRawWriteOptions
   extends Omit<CTRMemoryNumericWriteOptions, "endianness"> {
-  full?: boolean;
   count?: number;
   limit?: number;
+  partial?: boolean;
   padding?: CTRMemorySource;
   encoding?: CTRMemoryEncoding;
 }
 //#endregion
 
 //#region
+const { MAX_LENGTH } = constants;
+
 const CTR_MEMORY_DEFAULT_GROWTH = 1.5;
 const CTR_MEMORY_DEFAULT_ENCODING = "utf8";
 const CTR_MEMORY_DEFAULT_TERMINATOR = "\0";
@@ -249,6 +255,9 @@ const CTR_MEMORY_EMPTY = Buffer.alloc(0);
 //#endregion
 
 class CTRMemory {
+  public static readonly MAX_SIZE = MAX_LENGTH;
+  public static readonly MAX_LENGTH = MAX_LENGTH;
+
   public static readonly BOM_BE = CTR_MEMORY_BOM_BE;
   public static readonly BOM_LE = CTR_MEMORY_BOM_LE;
   public static readonly DATA_TYPES = CTR_MEMORY_DATA_TYPES;
@@ -338,11 +347,17 @@ class CTRMemory {
 
   public static sizeof(type: CTRMemoryDataType): number {
     const size = CTR_MEMORY_SIZE.get(type);
-    return size !== undefined ? size : 0;
+    return size !== undefined ? size : NaN;
   }
 
   public static isSource(value: unknown): value is CTRMemorySource {
-    return _issource(value);
+    return (
+      Array.isArray(value) ||
+      value instanceof CTRMemory ||
+      typeof value === "string" ||
+      typeof value === "number" ||
+      value instanceof Uint8Array
+    );
   }
 
   public static bitlength(string: string, encoding: CTRMemoryEncoding): number {
@@ -353,21 +368,165 @@ class CTRMemory {
     string: string,
     encoding: CTRMemoryEncoding
   ): number {
-    const _encoding = _normalizeEncoding(undefined, encoding, "LE");
-
-    if (_encoding === "utf16be") {
-      return Buffer.byteLength(string, "utf16le");
-    }
-
-    return Buffer.byteLength(string, _encoding);
+    return new CTRMemory(string, encoding).length;
   }
 
   public static sizeofbits(type: CTRMemoryBOMDataType): number {
     return this.sizeof(type) * CTRMemory.BITS;
   }
 
-  private _used: boolean;
+  public static normalizeEncoding(
+    buffer: CTRMemory,
+    encoding: string,
+    endianness: CTRMemoryEndianness
+  ): "utf16be" | BufferEncoding {
+    let _encoding = encoding.toLowerCase().replace(/[^0-9a-z]/g, "");
+
+    if (_encoding === "utf16") {
+      _encoding += endianness.toLowerCase();
+    }
+
+    if (_encoding !== "utf16be" && !Buffer.isEncoding(_encoding)) {
+      throw new CTRMemoryUnknownEncodingError(buffer, encoding);
+    }
+
+    return _encoding;
+  }
+
+  public static normalizeEndianness(
+    buffer: CTRMemory,
+    endianness: string
+  ): CTRMemoryEndianness {
+    let _endianness = endianness.toUpperCase();
+
+    if (_endianness === "BE" || _endianness === "LE") {
+      return _endianness;
+    }
+
+    throw new CTRMemoryUnknownEndiannessError(buffer, endianness);
+  }
+
+  private static _decode(
+    buffer: CTRMemory,
+    input: Buffer,
+    encoding: string,
+    endianness: CTRMemoryEndianness
+  ): string {
+    const _encoding = CTRMemory.normalizeEncoding(buffer, encoding, endianness);
+
+    if (_encoding === "utf16be") {
+      const tmp = Buffer.from(input);
+
+      for (let i = 0; i + 1 < buffer.length; i += CTR_MEMORY_U16_SIZE) {
+        tmp.writeUInt16LE(tmp.readUint16BE(i), i);
+      }
+
+      return tmp.toString("utf16le");
+    }
+
+    return input.toString(_encoding);
+  }
+
+  private static _encode(
+    buffer: CTRMemory,
+    string: string,
+    encoding: string,
+    endianness: CTRMemoryEndianness
+  ): Buffer {
+    const _encoding = CTRMemory.normalizeEncoding(buffer, encoding, endianness);
+
+    if (_encoding === "utf16be") {
+      const buffer = Buffer.from(string, "utf16le");
+
+      for (let i = 0; i + 1 < buffer.length; i += CTR_MEMORY_U16_SIZE) {
+        buffer.writeUInt16BE(buffer.readUint16LE(i), i);
+      }
+
+      return buffer;
+    }
+
+    return Buffer.from(string, _encoding);
+  }
+
+  private static _source(
+    buffer: CTRMemory,
+    source: CTRMemorySource,
+    encoding: CTRMemoryEncoding,
+    endianness: CTRMemoryEndianness
+  ): Uint8Array {
+    return source instanceof Uint8Array
+      ? source
+      : source instanceof CTRMemory
+        ? source.buffer
+        : typeof source === "string"
+          ? CTRMemory._encode(buffer, source, encoding, endianness)
+          : typeof source === "object"
+            ? new Uint8Array(source)
+            : new Uint8Array([source]);
+  }
+
+  private static _validateCount(
+    buffer: CTRMemory,
+    count: number | undefined,
+    actual: number,
+    action: CTRMemoryAction
+  ): void {
+    if (count !== undefined && actual !== count) {
+      throw new CTRMemoryCountFailError(buffer, count, actual, action);
+    }
+  }
+
+  private static _validateRange(
+    buffer: CTRMemory,
+    type: CTRMemoryDataType,
+    value: bigint | number
+  ): void {
+    const max = CTRMemory.max(type);
+    const min = CTRMemory.min(type);
+
+    if (value < min || value > max) {
+      throw new CTRMemoryOutOfRangeError(buffer, value, type, <CTRMemoryRange>[
+        min,
+        max
+      ]);
+    }
+  }
+
+  private static _validateSizeofOrGrow(
+    buffer: CTRMemory,
+    sizeof: number,
+    action: CTRMemoryAction,
+    type: CTRMemoryDataType,
+    count: number | undefined,
+    actual: number,
+    allowGrow: boolean,
+    options?: CTRMemoryNumericWriteOptions
+  ): boolean {
+    if (
+      buffer.offset + sizeof > buffer.capacity ||
+      (action !== "write" && buffer.offset + sizeof > buffer.length)
+    ) {
+      if (
+        allowGrow &&
+        (options?.grow === undefined ? buffer._options.growth : options.grow)
+      ) {
+        buffer._grow(buffer._offset + sizeof);
+        return true;
+      }
+
+      if (options?.lenient || buffer._options.lenient) {
+        return false;
+      }
+
+      CTRMemory._validateCount(buffer, count, actual, action);
+      throw new CTRMemoryOOBError(buffer, buffer._offset, type, action);
+    }
+
+    return true;
+  }
+
   private _size: number;
+  private _used: boolean;
   private _offset: number;
   private _memory: Buffer;
   private _lastread: number;
@@ -424,7 +583,7 @@ class CTRMemory {
 
     const options =
       _optionsOrSizeOrSourceOrString !== undefined &&
-      !_issource(_optionsOrSizeOrSourceOrString)
+      !CTRMemory.isSource(_optionsOrSizeOrSourceOrString)
         ? _optionsOrSizeOrSourceOrString
         : typeof _optionsOrEncoding === "object"
           ? _optionsOrEncoding
@@ -437,7 +596,7 @@ class CTRMemory {
 
     const source =
       typeof _optionsOrSizeOrSourceOrString !== "number" &&
-      _issource(_optionsOrSizeOrSourceOrString)
+      CTRMemory.isSource(_optionsOrSizeOrSourceOrString)
         ? _optionsOrSizeOrSourceOrString
         : options.source;
 
@@ -450,9 +609,7 @@ class CTRMemory {
   }
 
   public get size(): number {
-    if (this._used) {
-      throw new CTRMemoryUsedError();
-    }
+    this._check();
 
     if (this._allocated) {
       return this._size;
@@ -462,9 +619,7 @@ class CTRMemory {
   }
 
   public set size(size: number) {
-    if (this._used) {
-      throw new CTRMemoryUsedError();
-    }
+    this._check();
 
     if (this._allocated) {
       this.reallocate(size);
@@ -496,10 +651,7 @@ class CTRMemory {
   }
 
   public set length(length: number) {
-    if (this._used) {
-      throw new CTRMemoryUsedError();
-    }
-
+    this._check();
     this.size = length;
   }
 
@@ -512,25 +664,19 @@ class CTRMemory {
   }
 
   public get growth(): number {
-    if (this._used) {
-      throw new CTRMemoryUsedError();
-    }
-
+    this._check();
     return this._options.growth;
   }
 
   public set growth(growth: boolean | number) {
-    if (this._used) {
-      throw new CTRMemoryUsedError();
-    }
+    this._check();
 
     if (typeof growth === "number" && growth !== 0 && growth < 1) {
       throw new CTRMemoryOutOfRangeError(
-        {
-          buffer: this,
-          value: growth,
-          range: [1, Infinity]
-        },
+        this,
+        growth,
+        null,
+        [1, Infinity],
         `growth factor must be 0 or equal to or more than 1`
       );
     }
@@ -547,26 +693,17 @@ class CTRMemory {
   }
 
   public get lenient(): boolean {
-    if (this._used) {
-      throw new CTRMemoryUsedError();
-    }
-
+    this._check();
     return this._options.lenient;
   }
 
   public set lenient(lenient: boolean) {
-    if (this._used) {
-      throw new CTRMemoryUsedError();
-    }
-
+    this._check();
     this._options.lenient = lenient;
   }
 
   public get values(): ArrayIterator<number> {
-    if (this._used) {
-      throw new CTRMemoryUsedError();
-    }
-
+    this._check();
     return this.buffer.values();
   }
 
@@ -576,19 +713,14 @@ class CTRMemory {
   }
 
   public get encoding(): CTRMemoryEncoding {
-    if (this._used) {
-      throw new CTRMemoryUsedError();
-    }
-
+    this._check();
     return this._options.encoding;
   }
 
   public set encoding(encoding: CTRMemoryEncoding) {
-    if (this._used) {
-      throw new CTRMemoryUsedError();
-    }
+    this._check();
 
-    this._options.encoding = _normalizeEncoding(
+    this._options.encoding = CTRMemory.normalizeEncoding(
       this,
       encoding,
       this._options.endianness
@@ -604,42 +736,27 @@ class CTRMemory {
   }
 
   public get endianness(): CTRMemoryEndianness {
-    if (this._used) {
-      throw new CTRMemoryUsedError();
-    }
-
+    this._check();
     return this._options.endianness;
   }
 
   public set endianness(endianness: CTRMemoryEndianness) {
-    if (this._used) {
-      throw new CTRMemoryUsedError();
-    }
-
-    this._options.endianness = _normalizeEndianness(this, endianness);
+    this._check();
+    this._options.endianness = CTRMemory.normalizeEndianness(this, endianness);
   }
 
   public get terminator(): CTRMemoryTerminator {
-    if (this._used) {
-      throw new CTRMemoryUsedError();
-    }
-
+    this._check();
     return this._options.terminator;
   }
 
   public set terminator(terminator: CTRMemoryTerminator) {
-    if (this._used) {
-      throw new CTRMemoryUsedError();
-    }
-
+    this._check();
     this._options.terminator = terminator;
   }
 
   public get lastwritten(): number {
-    if (this._used) {
-      throw new CTRMemoryUsedError();
-    }
-
+    this._check();
     return this._lastwritten;
   }
 
@@ -657,12 +774,6 @@ class CTRMemory {
     datatype: "string",
     options?: CTRMemoryStringReadOptions
   ): CTRMemory;
-
-  public at(
-    offset: number,
-    datatype: "i64" | "u64",
-    options?: CTRMemoryNumericReadOptions
-  ): bigint;
 
   public at(
     offset: number,
@@ -711,9 +822,11 @@ class CTRMemory {
         return fn(this);
       }
 
-      throw new CTRMemoryError(
-        CTRMemoryError.ERR_INVALID_ARGUMENT,
-        { buffer: this },
+      throw new CTRMemoryInvalidOperationError(
+        this,
+        null,
+        "seek",
+        null,
         "expected either 'fn' or 'datatype' to be passed but none was passed"
       );
     } finally {
@@ -851,10 +964,13 @@ class CTRMemory {
     _valueOrOptions?: CTRMemorySource | CTRMemoryBoundedReadBaseOptions,
     _options?: CTRMemoryRawWriteOptions
   ): this | CTRMemory {
-    const value = _issource(_valueOrOptions) ? _valueOrOptions : undefined;
+    const value = CTRMemory.isSource(_valueOrOptions)
+      ? _valueOrOptions
+      : undefined;
 
     const options =
-      !_issource(_valueOrOptions) && typeof _valueOrOptions === "object"
+      !CTRMemory.isSource(_valueOrOptions) &&
+      typeof _valueOrOptions === "object"
         ? _valueOrOptions
         : _options;
 
@@ -1264,26 +1380,20 @@ class CTRMemory {
       case "string":
         return this.readString(<CTRMemoryStringReadOptions>options);
       default:
-        throw new CTRMemoryError(
-          CTRMemoryError.ERR_INVALID_ARGUMENT,
-          { buffer: this },
-          `unknown datatype '${datatype}'`
-        );
+        throw new CTRMemoryUnknownTypeError(this, datatype);
     }
   }
 
   public seek(offset: number): this {
-    if (this._used) {
-      throw new CTRMemoryUsedError();
-    }
+    this._check();
 
     if (offset >= 0 && offset > this._size) {
-      throw new CTRMemoryOOBError({ offset, buffer: this, action: "read" });
+      throw new CTRMemoryOOBError(this, offset, null, "seek");
     }
 
     if (offset < 0) {
       if (-offset > this._size) {
-        throw new CTRMemoryOOBError({ offset, buffer: this, action: "read" });
+        throw new CTRMemoryOOBError(this, offset, null, "seek");
       }
 
       offset = this._size + offset;
@@ -1375,26 +1485,14 @@ class CTRMemory {
     const datatype =
       typeof _optionsOrDatatype === "string" ? _optionsOrDatatype : undefined;
 
-    if (typeof value === "bigint") {
-      if (datatype === undefined) {
-        throw new CTRMemoryError(
-          CTRMemoryError.ERR_INVALID_ARGUMENT,
-          { buffer: this },
-          `argument 'datatype' is required when writing a bigint`
-        );
-      } else if (datatype === "i64") {
+    if (datatype !== undefined && typeof value === "bigint") {
+      if (datatype === "i64") {
         return this.writeI64(value, options);
       } else if (datatype === "u64") {
         return this.writeU64(value, options);
       }
-    } else if (typeof value === "number") {
-      if (datatype === undefined) {
-        throw new CTRMemoryError(
-          CTRMemoryError.ERR_INVALID_ARGUMENT,
-          { buffer: this },
-          `argument 'datatype' is required when writing a bigint`
-        );
-      } else if (datatype === "i8") {
+    } else if (datatype !== undefined && typeof value === "number") {
+      if (datatype === "i8") {
         return this.writeI8(value, options);
       } else if (datatype === "u8") {
         return this.writeU8(value, options);
@@ -1424,37 +1522,31 @@ class CTRMemory {
         return this.writeI64(value, options);
       } else if (datatype === "u64") {
         return this.writeU64(value, options);
-      } else {
-        throw new CTRMemoryError(
-          CTRMemoryError.ERR_INVALID_ARGUMENT,
-          { buffer: this },
-          `cannot write a number as a ${datatype}`
-        );
       }
     } else if (typeof value === "string") {
-      if (typeof datatype !== "string") {
-        throw new CTRMemoryError(
-          CTRMemoryError.ERR_INVALID_ARGUMENT,
-          { buffer: this },
-          `cannot write a ${typeof value} as a ${datatype}`
-        );
+      if (datatype === undefined || datatype === "string") {
+        return this.writeString(value, options);
       }
-
-      return this.writeString(value, options);
-    } else if (!_issource(value)) {
-      throw new CTRMemoryError(
-        CTRMemoryError.ERR_INVALID_ARGUMENT,
-        { buffer: this },
-        `expected 'value' to be a CTRMemorySource (string, number, Buffer, CTRMemory, array of numbers or Uint8Array) but got a ${typeof value} instead`
-      );
-    } else {
+    } else if (CTRMemory.isSource(value)) {
       return this.writeRaw(value, options);
     }
 
-    throw new CTRMemoryError(
-      CTRMemoryError.ERR_INVALID_ARGUMENT,
-      { buffer: this },
-      `cannot handle writing a ${typeof value} as ${typeof datatype}`
+    if (datatype === undefined) {
+      throw new CTRMemoryInvalidOperationError(
+        this,
+        value,
+        "write",
+        null,
+        `argument 'datatype' is required when writing a ${typeof value}`
+      );
+    }
+
+    throw new CTRMemoryInvalidOperationError(
+      this,
+      value,
+      "write",
+      datatype,
+      `cannot write a ${typeof value} as a ${datatype}`
     );
   }
 
@@ -1474,57 +1566,13 @@ class CTRMemory {
   public readI8(
     options?: Pick<CTRMemoryNumericReadOptions, "lenient">
   ): number {
-    this._lastread = NaN;
-    this._lazyalloc();
-
-    if (this._offset + CTR_MEMORY_I8_SIZE > this._size) {
-      if (options?.lenient || this._options.lenient) {
-        this._lastread = 0;
-        return 0;
-      }
-
-      throw new CTRMemoryOOBError({
-        buffer: this,
-        action: "read",
-        datatype: "i8",
-        offset: this._offset
-      });
-    }
-
-    const read = this.buffer.readInt8(this._offset);
-
-    this._lastread = CTR_MEMORY_I8_SIZE;
-    this._offset += this._lastread;
-
-    return read;
+    return this._readNumeric("i8", options);
   }
 
   public readU8(
     options?: Pick<CTRMemoryNumericReadOptions, "lenient">
   ): number {
-    this._lastread = NaN;
-    this._lazyalloc();
-
-    if (this._offset + CTR_MEMORY_U8_SIZE > this._size) {
-      if (options?.lenient || this._options.lenient) {
-        this._lastread = 0;
-        return 0;
-      }
-
-      throw new CTRMemoryOOBError({
-        buffer: this,
-        action: "read",
-        datatype: "u8",
-        offset: this._offset
-      });
-    }
-
-    const read = this.buffer.readUInt8(this._offset);
-
-    this._lastread = CTR_MEMORY_U8_SIZE;
-    this._offset += this._lastread;
-
-    return read;
+    return this._readNumeric("u8", options);
   }
 
   public skip(size: number): this {
@@ -1587,13 +1635,14 @@ class CTRMemory {
       } else if (type === "u32") {
         mark = this.readU32({ ...options, endianness: undefined });
       } else {
-        throw new CTRMemoryError(
-          CTRMemoryError.ERR_INVALID_ARGUMENT,
-          { buffer: this },
-          `unknown BOM type '${type}'`
+        throw new CTRMemoryInvalidOperationError(
+          this,
+          null,
+          "read",
+          type,
+          `cannot read a BOM as a ${type}`
         );
       }
-
       if (mark === CTR_MEMORY_BOM_BE) {
         return "BE";
       }
@@ -1602,46 +1651,12 @@ class CTRMemory {
         return "LE";
       }
 
-      throw new CTRMemoryError(
-        CTRMemoryError.ERR_INVALID_ARGUMENT,
-        { buffer: this },
-        `unknown BOM ${mark}`
-      );
+      throw new CTRMemoryUnknownBOMMarkError(this, mark);
     });
   }
 
   public readI16(options?: CTRMemoryNumericReadOptions): number {
-    this._lastread = NaN;
-    this._lazyalloc();
-
-    if (this._offset + CTR_MEMORY_I16_SIZE > this._size) {
-      if (options?.lenient || this._options.lenient) {
-        this._lastread = 0;
-        return 0;
-      }
-
-      throw new CTRMemoryOOBError({
-        buffer: this,
-        action: "read",
-        datatype: "i16",
-        offset: this._offset
-      });
-    }
-
-    const endianness =
-      options?.endianness !== undefined
-        ? _normalizeEndianness(this, options.endianness)
-        : this._options.endianness;
-
-    const read =
-      endianness === "BE"
-        ? this.buffer.readInt16BE(this._offset)
-        : this.buffer.readInt16LE(this._offset);
-
-    this._lastread = CTR_MEMORY_I16_SIZE;
-    this._offset += this._lastread;
-
-    return read;
+    return this._readNumeric("i16", options);
   }
 
   public readRaw(options?: CTRMemoryBoundedReadBaseOptions): CTRMemory {
@@ -1651,27 +1666,20 @@ class CTRMemory {
     const count = options?.count;
     const limit = options?.limit || Infinity;
 
-    if (this._offset + 1 > this._size) {
-      if (count !== undefined && count !== 0) {
-        throw new CTRMemoryCountFailError({
-          count,
-          actual: 0,
-          buffer: this,
-          action: "read"
-        });
-      }
-
-      if (options?.lenient || this._options.lenient) {
-        this._lastread = 0;
-        return new CTRMemory([], options);
-      }
-
-      throw new CTRMemoryOOBError({
-        buffer: this,
-        action: "read",
-        datatype: "raw",
-        offset: this._offset
-      });
+    if (
+      !CTRMemory._validateSizeofOrGrow(
+        this,
+        1,
+        "read",
+        "raw",
+        count,
+        0,
+        false,
+        options
+      )
+    ) {
+      this._lastread = 0;
+      return new CTRMemory([], options);
     }
 
     const subarray = this.buffer.subarray(
@@ -1684,14 +1692,7 @@ class CTRMemory {
         )
     );
 
-    if (count !== undefined && subarray.length !== count) {
-      throw new CTRMemoryCountFailError({
-        count,
-        buffer: this,
-        action: "read",
-        actual: subarray.length
-      });
-    }
+    CTRMemory._validateCount(this, count, subarray.length, "read");
 
     this._lastread = subarray.length;
     this._offset += this._lastread;
@@ -1700,445 +1701,55 @@ class CTRMemory {
   }
 
   public readU16(options?: CTRMemoryNumericReadOptions): number {
-    this._lastread = NaN;
-    this._lazyalloc();
-
-    if (this._offset + CTR_MEMORY_U16_SIZE > this._size) {
-      if (options?.lenient || this._options.lenient) {
-        this._lastread = 0;
-        return 0;
-      }
-
-      throw new CTRMemoryOOBError({
-        buffer: this,
-        action: "read",
-        datatype: "u16",
-        offset: this._offset
-      });
-    }
-
-    const endianness =
-      options?.endianness !== undefined
-        ? _normalizeEndianness(this, options.endianness)
-        : this._options.endianness;
-
-    const read =
-      endianness === "BE"
-        ? this.buffer.readUInt16BE(this._offset)
-        : this.buffer.readUInt16LE(this._offset);
-
-    this._lastread = CTR_MEMORY_U16_SIZE;
-    this._offset += this._lastread;
-
-    return read;
+    return this._readNumeric("u16", options);
   }
 
   public readI24(options?: CTRMemoryNumericReadOptions): number {
-    this._lastread = NaN;
-    this._lazyalloc();
-
-    if (this._offset + CTR_MEMORY_I24_SIZE > this._size) {
-      if (options?.lenient || this._options.lenient) {
-        this._lastread = 0;
-        return 0;
-      }
-
-      throw new CTRMemoryOOBError({
-        buffer: this,
-        action: "read",
-        datatype: "i24",
-        offset: this._offset
-      });
-    }
-
-    const endianness =
-      options?.endianness !== undefined
-        ? _normalizeEndianness(this, options.endianness)
-        : this._options.endianness;
-
-    const read =
-      endianness === "BE"
-        ? this.buffer.readIntBE(this._offset, 3)
-        : this.buffer.readIntLE(this._offset, 3);
-
-    this._lastread = CTR_MEMORY_I24_SIZE;
-    this._offset += this._lastread;
-
-    return read;
+    return this._readNumeric("i24", options);
   }
 
   public readU24(options?: CTRMemoryNumericReadOptions): number {
-    this._lastread = NaN;
-    this._lazyalloc();
-
-    if (this._offset + CTR_MEMORY_U24_SIZE > this._size) {
-      if (options?.lenient || this._options.lenient) {
-        this._lastread = 0;
-        return 0;
-      }
-
-      throw new CTRMemoryOOBError({
-        buffer: this,
-        action: "read",
-        datatype: "u24",
-        offset: this._offset
-      });
-    }
-
-    const endianness =
-      options?.endianness !== undefined
-        ? _normalizeEndianness(this, options.endianness)
-        : this._options.endianness;
-
-    const read =
-      endianness === "BE"
-        ? this.buffer.readUIntBE(this._offset, 3)
-        : this.buffer.readUIntLE(this._offset, 3);
-
-    this._lastread = CTR_MEMORY_U24_SIZE;
-    this._offset += this._lastread;
-
-    return read;
+    return this._readNumeric("u24", options);
   }
 
   public readF32(options?: CTRMemoryNumericReadOptions): number {
-    this._lastread = NaN;
-    this._lazyalloc();
-
-    if (this._offset + CTR_MEMORY_F32_SIZE > this._size) {
-      if (options?.lenient || this._options.lenient) {
-        this._lastread = 0;
-        return 0;
-      }
-
-      throw new CTRMemoryOOBError({
-        buffer: this,
-        action: "read",
-        datatype: "f32",
-        offset: this._offset
-      });
-    }
-
-    const endianness =
-      options?.endianness !== undefined
-        ? _normalizeEndianness(this, options.endianness)
-        : this._options.endianness;
-
-    const read =
-      endianness === "BE"
-        ? this.buffer.readFloatBE(this._offset)
-        : this.buffer.readFloatLE(this._offset);
-
-    this._lastread = CTR_MEMORY_F32_SIZE;
-    this._offset += this._lastread;
-
-    return read;
+    return this._readNumeric("f32", options);
   }
 
   public readI32(options?: CTRMemoryNumericReadOptions): number {
-    this._lastread = NaN;
-    this._lazyalloc();
-
-    if (this._offset + CTR_MEMORY_I32_SIZE > this._size) {
-      if (options?.lenient || this._options.lenient) {
-        this._lastread = 0;
-        return 0;
-      }
-
-      throw new CTRMemoryOOBError({
-        buffer: this,
-        action: "read",
-        datatype: "i32",
-        offset: this._offset
-      });
-    }
-
-    const endianness =
-      options?.endianness !== undefined
-        ? _normalizeEndianness(this, options.endianness)
-        : this._options.endianness;
-
-    const read =
-      endianness === "BE"
-        ? this.buffer.readInt32BE(this._offset)
-        : this.buffer.readInt32LE(this._offset);
-
-    this._lastread = CTR_MEMORY_I32_SIZE;
-    this._offset += this._lastread;
-
-    return read;
+    return this._readNumeric("i32", options);
   }
 
   public readU32(options?: CTRMemoryNumericReadOptions): number {
-    this._lastread = NaN;
-    this._lazyalloc();
-
-    if (this._offset + CTR_MEMORY_U32_SIZE > this._size) {
-      if (options?.lenient || this._options.lenient) {
-        this._lastread = 0;
-        return 0;
-      }
-
-      throw new CTRMemoryOOBError({
-        buffer: this,
-        action: "read",
-        datatype: "u32",
-        offset: this._offset
-      });
-    }
-
-    const endianness =
-      options?.endianness !== undefined
-        ? _normalizeEndianness(this, options.endianness)
-        : this._options.endianness;
-
-    const read =
-      endianness === "BE"
-        ? this.buffer.readUInt32BE(this._offset)
-        : this.buffer.readUInt32LE(this._offset);
-
-    this._lastread = CTR_MEMORY_U32_SIZE;
-    this._offset += this._lastread;
-
-    return read;
+    return this._readNumeric("u32", options);
   }
 
   public readI40(options?: CTRMemoryNumericReadOptions): number {
-    this._lastread = NaN;
-    this._lazyalloc();
-
-    if (this._offset + CTR_MEMORY_I40_SIZE > this._size) {
-      if (options?.lenient || this._options.lenient) {
-        this._lastread = 0;
-        return 0;
-      }
-
-      throw new CTRMemoryOOBError({
-        buffer: this,
-        action: "read",
-        datatype: "i40",
-        offset: this._offset
-      });
-    }
-
-    const endianness =
-      options?.endianness !== undefined
-        ? _normalizeEndianness(this, options.endianness)
-        : this._options.endianness;
-
-    const read =
-      endianness === "BE"
-        ? this.buffer.readIntBE(this._offset, 5)
-        : this.buffer.readIntLE(this._offset, 5);
-
-    this._lastread = CTR_MEMORY_I40_SIZE;
-    this._offset += this._lastread;
-
-    return read;
+    return this._readNumeric("i40", options);
   }
 
   public readU40(options?: CTRMemoryNumericReadOptions): number {
-    this._lastread = NaN;
-    this._lazyalloc();
-
-    if (this._offset + CTR_MEMORY_U40_SIZE > this._size) {
-      if (options?.lenient || this._options.lenient) {
-        this._lastread = 0;
-        return 0;
-      }
-
-      throw new CTRMemoryOOBError({
-        buffer: this,
-        action: "read",
-        datatype: "u40",
-        offset: this._offset
-      });
-    }
-
-    const endianness =
-      options?.endianness !== undefined
-        ? _normalizeEndianness(this, options.endianness)
-        : this._options.endianness;
-
-    const read =
-      endianness === "BE"
-        ? this.buffer.readUIntBE(this._offset, 5)
-        : this.buffer.readUIntLE(this._offset, 5);
-
-    this._lastread = CTR_MEMORY_U40_SIZE;
-    this._offset += this._lastread;
-
-    return read;
+    return this._readNumeric("u40", options);
   }
 
   public readI48(options?: CTRMemoryNumericReadOptions): number {
-    this._lastread = NaN;
-    this._lazyalloc();
-
-    if (this._offset + CTR_MEMORY_I48_SIZE > this._size) {
-      if (options?.lenient || this._options.lenient) {
-        this._lastread = 0;
-        return 0;
-      }
-
-      throw new CTRMemoryOOBError({
-        buffer: this,
-        action: "read",
-        datatype: "i48",
-        offset: this._offset
-      });
-    }
-
-    const endianness =
-      options?.endianness !== undefined
-        ? _normalizeEndianness(this, options.endianness)
-        : this._options.endianness;
-
-    const read =
-      endianness === "BE"
-        ? this.buffer.readIntBE(this._offset, 3)
-        : this.buffer.readIntLE(this._offset, 3);
-
-    this._lastread = CTR_MEMORY_I48_SIZE;
-    this._offset += this._lastread;
-
-    return read;
+    return this._readNumeric("i48", options);
   }
 
   public readU48(options?: CTRMemoryNumericReadOptions): number {
-    this._lastread = NaN;
-    this._lazyalloc();
-
-    if (this._offset + CTR_MEMORY_U48_SIZE > this._size) {
-      if (options?.lenient || this._options.lenient) {
-        this._lastread = 0;
-        return 0;
-      }
-
-      throw new CTRMemoryOOBError({
-        buffer: this,
-        action: "read",
-        datatype: "u48",
-        offset: this._offset
-      });
-    }
-
-    const endianness =
-      options?.endianness !== undefined
-        ? _normalizeEndianness(this, options.endianness)
-        : this._options.endianness;
-
-    const read =
-      endianness === "BE"
-        ? this.buffer.readUIntBE(this._offset, 6)
-        : this.buffer.readUIntLE(this._offset, 6);
-
-    this._lastread = CTR_MEMORY_U48_SIZE;
-    this._offset += this._lastread;
-
-    return read;
+    return this._readNumeric("u48", options);
   }
 
   public readF64(options?: CTRMemoryNumericReadOptions): number {
-    this._lastread = NaN;
-    this._lazyalloc();
-
-    if (this._offset + CTR_MEMORY_F64_SIZE > this._size) {
-      if (options?.lenient || this._options.lenient) {
-        this._lastread = 0;
-        return 0;
-      }
-
-      throw new CTRMemoryOOBError({
-        buffer: this,
-        action: "read",
-        datatype: "f64",
-        offset: this._offset
-      });
-    }
-
-    const endianness =
-      options?.endianness !== undefined
-        ? _normalizeEndianness(this, options.endianness)
-        : this._options.endianness;
-
-    const read =
-      endianness === "BE"
-        ? this.buffer.readFloatBE(this._offset)
-        : this.buffer.readFloatLE(this._offset);
-
-    this._lastread = CTR_MEMORY_F64_SIZE;
-    this._offset += this._lastread;
-
-    return read;
+    return this._readNumeric("f64", options);
   }
 
   public readI64(options?: CTRMemoryNumericReadOptions): bigint {
-    this._lastread = NaN;
-    this._lazyalloc();
-
-    if (this._offset + CTR_MEMORY_I64_SIZE > this._size) {
-      if (options?.lenient || this._options.lenient) {
-        this._lastread = 0;
-        return 0n;
-      }
-
-      throw new CTRMemoryOOBError({
-        buffer: this,
-        action: "read",
-        datatype: "i64",
-        offset: this._offset
-      });
-    }
-
-    const endianness =
-      options?.endianness !== undefined
-        ? _normalizeEndianness(this, options.endianness)
-        : this._options.endianness;
-
-    const read =
-      endianness === "BE"
-        ? this.buffer.readBigInt64BE(this._offset)
-        : this.buffer.readBigInt64LE(this._offset);
-
-    this._lastread = CTR_MEMORY_I64_SIZE;
-    this._offset += this._lastread;
-
-    return read;
+    return this._readNumeric("i64", options);
   }
 
   public readU64(options?: CTRMemoryNumericReadOptions): bigint {
-    this._lastread = NaN;
-    this._lazyalloc();
-
-    if (this._offset + CTR_MEMORY_U64_SIZE > this._size) {
-      if (options?.lenient || this._options.lenient) {
-        this._lastread = 0;
-        return 0n;
-      }
-
-      throw new CTRMemoryOOBError({
-        buffer: this,
-        action: "read",
-        datatype: "u64",
-        offset: this._offset
-      });
-    }
-
-    const endianness =
-      options?.endianness !== undefined
-        ? _normalizeEndianness(this, options.endianness)
-        : this._options.endianness;
-
-    const read =
-      endianness === "BE"
-        ? this.buffer.readBigUInt64BE(this._offset)
-        : this.buffer.readBigUInt64LE(this._offset);
-
-    this._lastread = CTR_MEMORY_U64_SIZE;
-    this._offset += this._lastread;
-
-    return read;
+    return this._readNumeric("u64", options);
   }
 
   public reverse(): this {
@@ -2150,45 +1761,7 @@ class CTRMemory {
   }
 
   public writeI8(value: number, options?: CTRMemoryNumericWriteOptions): this {
-    this._lastwritten = NaN;
-    this._lazyalloc();
-
-    if (value < CTR_MEMORY_I8_MIN || value > CTR_MEMORY_I8_MAX) {
-      throw new CTRMemoryOutOfRangeError({
-        buffer: this,
-        value: value,
-        datatype: "i8",
-        range: [CTR_MEMORY_I8_MIN, CTR_MEMORY_I8_MAX]
-      });
-    }
-
-    if (this._offset + CTR_MEMORY_I8_SIZE > this.capacity) {
-      if (options?.grow === undefined ? !this._options.growth : !options.grow) {
-        if (options?.lenient || this._options.lenient) {
-          this._lastwritten = 0;
-          return this;
-        }
-
-        throw new CTRMemoryOOBError({
-          buffer: this,
-          action: "write",
-          datatype: "i8",
-          offset: this._offset
-        });
-      }
-
-      this._grow(this._offset + CTR_MEMORY_I8_SIZE);
-    }
-
-    this._memory.writeInt8(value, this._offset);
-    this._lastwritten = CTR_MEMORY_I8_SIZE;
-
-    if (this._offset + this._lastwritten > this._size) {
-      this._size = this._offset + this._lastwritten;
-    }
-
-    this._offset += this._lastwritten;
-    return this;
+    return this._writeNumeric("i8", value, options);
   }
 
   public allocate(): this {
@@ -2245,46 +1818,7 @@ class CTRMemory {
   }
 
   public writeU8(value: number, options?: CTRMemoryNumericWriteOptions): this {
-    this._lastwritten = NaN;
-    this._lazyalloc();
-
-    if (value < CTR_MEMORY_U8_MIN || value > CTR_MEMORY_U8_MAX) {
-      throw new CTRMemoryOutOfRangeError({
-        buffer: this,
-        value: value,
-        datatype: "u8",
-        range: [CTR_MEMORY_U8_MIN, CTR_MEMORY_U8_MAX]
-      });
-    }
-
-    if (this._offset + CTR_MEMORY_U8_SIZE > this.capacity) {
-      if (options?.grow === undefined ? !this._options.growth : !options.grow) {
-        if (options?.lenient || this._options.lenient) {
-          this._lastwritten = 0;
-          return this;
-        }
-
-        throw new CTRMemoryOOBError({
-          buffer: this,
-          action: "write",
-          datatype: "u8",
-          offset: this._offset
-        });
-      }
-
-      this._grow(this._offset + CTR_MEMORY_U8_SIZE);
-    }
-
-    this._memory.writeUInt8(value, this._offset);
-
-    this._lastwritten = CTR_MEMORY_U8_SIZE;
-
-    if (this._offset + this._lastwritten > this._size) {
-      this._size = this._offset + this._lastwritten;
-    }
-
-    this._offset += this._lastwritten;
-    return this;
+    return this._writeNumeric("u8", value, options);
   }
 
   public toString(
@@ -2294,7 +1828,7 @@ class CTRMemory {
   ): string {
     this._lazyalloc();
 
-    return _decode(
+    return CTRMemory._decode(
       this,
       this.buffer.subarray(start, end),
       encoding,
@@ -2318,10 +1852,12 @@ class CTRMemory {
       } else if (type === "u32") {
         this.writeU32(mark, { ...options, endianness: undefined });
       } else {
-        throw new CTRMemoryError(
-          CTRMemoryError.ERR_INVALID_ARGUMENT,
-          { buffer: this },
-          `unknown BOM type '${type}'`
+        throw new CTRMemoryInvalidOperationError(
+          this,
+          mark,
+          "write",
+          type,
+          `cannot write a BOM as a ${type}`
         );
       }
 
@@ -2330,48 +1866,7 @@ class CTRMemory {
   }
 
   public writeI16(value: number, options?: CTRMemoryNumericWriteOptions): this {
-    this._lastwritten = NaN;
-    this._lazyalloc();
-
-    if (value < CTR_MEMORY_I16_MIN || value > CTR_MEMORY_I16_MAX) {
-      throw new CTRMemoryOutOfRangeError({
-        buffer: this,
-        value: value,
-        datatype: "i16",
-        range: [CTR_MEMORY_I16_MIN, CTR_MEMORY_I16_MAX]
-      });
-    }
-
-    if (this._offset + CTR_MEMORY_I16_SIZE > this.capacity) {
-      if (options?.grow === undefined ? !this._options.growth : !options.grow) {
-        if (options?.lenient || this._options.lenient) {
-          this._lastwritten = 0;
-          return this;
-        }
-
-        throw new CTRMemoryOOBError({
-          buffer: this,
-          action: "write",
-          datatype: "i16",
-          offset: this._offset
-        });
-      }
-
-      this._grow(this._offset + CTR_MEMORY_I16_SIZE);
-    }
-
-    (options?.endianness || this._options.endianness) === "BE"
-      ? this._memory.writeInt16BE(value, this._offset)
-      : this._memory.writeInt16LE(value, this._offset);
-
-    this._lastwritten = CTR_MEMORY_I16_SIZE;
-
-    if (this._offset + this._lastwritten > this._size) {
-      this._size = this._offset + this._lastwritten;
-    }
-
-    this._offset += this._lastwritten;
-    return this;
+    return this._writeNumeric("i16", value, options);
   }
 
   public writeRaw(
@@ -2382,45 +1877,42 @@ class CTRMemory {
     this._lazyalloc();
 
     const start = this._offset;
-    const full = options?.full;
     const count = options?.count;
     const limit = options?.limit || Infinity;
+    const partial = Boolean(options?.partial);
 
     const encoding =
       options?.encoding !== undefined
         ? options.encoding
         : this._options.encoding;
 
-    const growth =
-      options?.grow === undefined ? this._options.growth : options.grow;
-
-    const data = Buffer.from(_source(this, value, encoding, this.endianness));
+    const data = Buffer.from(
+      CTRMemory._source(this, value, encoding, this.endianness)
+    );
     const subarray = data.subarray(0, Math.min(limit, data.length));
 
-    if (this._offset + subarray.length > this.capacity) {
-      if (growth) {
-        this._grow(this._offset + subarray.length);
-      } else if (count !== undefined) {
-        throw new CTRMemoryCountFailError({
-          count,
-          actual: 0,
-          buffer: this,
-          action: "write"
-        });
-      } else if (full) {
-        throw new CTRMemoryOOBError({
-          buffer: this,
-          action: "write",
-          datatype: "string",
-          offset: this._offset
-        });
-      }
+    if (
+      (!partial || count !== undefined) &&
+      !CTRMemory._validateSizeofOrGrow(
+        this,
+        subarray.length,
+        "write",
+        "raw",
+        count,
+        0,
+        true,
+        options
+      )
+    ) {
+      this._lastwritten = 0;
+      return this;
     }
 
-    this._lastwritten = subarray.copy(this._memory, this._offset);
+    let written = subarray.copy(this._memory, this._offset);
+    this._lastwritten = written;
 
-    if (this._offset + subarray.length > this._size) {
-      this._size = this._offset + subarray.length;
+    if (this._offset + written > this._size) {
+      this._size = this._offset + written;
     }
 
     this._offset += this._lastwritten;
@@ -2435,21 +1927,23 @@ class CTRMemory {
     ) {
       const size = count - this._offset - start;
 
-      if (this._offset + size > this.capacity) {
-        if (growth) {
-          this._grow(this._offset + size);
-        } else if (count !== undefined) {
-          throw new CTRMemoryCountFailError({
-            count,
-            buffer: this,
-            action: "write",
-            actual: subarray.length
-          });
-        }
+      if (
+        !CTRMemory._validateSizeofOrGrow(
+          this,
+          size,
+          "write",
+          "string",
+          count,
+          this._lastwritten,
+          true,
+          options
+        )
+      ) {
+        return this;
       }
 
       this._memory.fill(
-        _source(this, padding, encoding, this.endianness),
+        CTRMemory._source(this, padding, encoding, this.endianness),
         this._offset,
         this._offset + size
       );
@@ -2462,592 +1956,71 @@ class CTRMemory {
       this._offset += size;
     }
 
-    if (count !== undefined && this._lastwritten !== count) {
-      throw new CTRMemoryCountFailError({
-        count,
-        buffer: this,
-        action: "write",
-        actual: this._lastwritten
-      });
-    }
-
+    CTRMemory._validateCount(this, count, this._lastwritten, "write");
     return this;
   }
 
   public writeU16(value: number, options?: CTRMemoryNumericWriteOptions): this {
-    this._lastwritten = NaN;
-    this._lazyalloc();
-
-    if (value < CTR_MEMORY_U16_MIN || value > CTR_MEMORY_U16_MAX) {
-      throw new CTRMemoryOutOfRangeError({
-        buffer: this,
-        value: value,
-        datatype: "u16",
-        range: [CTR_MEMORY_U16_MIN, CTR_MEMORY_U16_MAX]
-      });
-    }
-
-    if (this._offset + CTR_MEMORY_U16_SIZE > this.capacity) {
-      if (options?.grow === undefined ? !this._options.growth : !options.grow) {
-        if (options?.lenient || this._options.lenient) {
-          this._lastwritten = 0;
-          return this;
-        }
-
-        throw new CTRMemoryOOBError({
-          buffer: this,
-          action: "write",
-          datatype: "u16",
-          offset: this._offset
-        });
-      }
-
-      this._grow(this._offset + CTR_MEMORY_U16_SIZE);
-    }
-
-    (options?.endianness || this._options.endianness) === "BE"
-      ? this._memory.writeUInt16BE(value, this._offset)
-      : this._memory.writeUInt16LE(value, this._offset);
-
-    this._lastwritten = CTR_MEMORY_U16_SIZE;
-
-    if (this._offset + this._lastwritten > this._size) {
-      this._size = this._offset + this._lastwritten;
-    }
-
-    this._offset += this._lastwritten;
-    return this;
+    return this._writeNumeric("u16", value, options);
   }
 
   public writeI24(value: number, options?: CTRMemoryNumericWriteOptions): this {
-    this._lastwritten = NaN;
-    this._lazyalloc();
-
-    if (value < CTR_MEMORY_I24_MIN || value > CTR_MEMORY_I24_MAX) {
-      throw new CTRMemoryOutOfRangeError({
-        buffer: this,
-        value: value,
-        datatype: "i24",
-        range: [CTR_MEMORY_I24_MIN, CTR_MEMORY_I24_MAX]
-      });
-    }
-
-    if (this._offset + CTR_MEMORY_I24_SIZE > this.capacity) {
-      if (options?.grow === undefined ? !this._options.growth : !options.grow) {
-        if (options?.lenient || this._options.lenient) {
-          this._lastwritten = 0;
-          return this;
-        }
-
-        throw new CTRMemoryOOBError({
-          buffer: this,
-          action: "write",
-          datatype: "i24",
-          offset: this._offset
-        });
-      }
-
-      this._grow(this._offset + CTR_MEMORY_I24_SIZE);
-    }
-
-    (options?.endianness || this._options.endianness) === "BE"
-      ? this._memory.writeIntBE(value, this._offset, 3)
-      : this._memory.writeIntLE(value, this._offset, 3);
-
-    this._lastwritten = CTR_MEMORY_I24_SIZE;
-
-    if (this._offset + this._lastwritten > this._size) {
-      this._size = this._offset + this._lastwritten;
-    }
-
-    this._offset += this._lastwritten;
-    return this;
+    return this._writeNumeric("i24", value, options);
   }
 
   public writeU24(value: number, options?: CTRMemoryNumericWriteOptions): this {
-    this._lastwritten = NaN;
-    this._lazyalloc();
-
-    if (value < CTR_MEMORY_U24_MIN || value > CTR_MEMORY_U24_MAX) {
-      throw new CTRMemoryOutOfRangeError({
-        buffer: this,
-        value: value,
-        datatype: "u24",
-        range: [CTR_MEMORY_U24_MIN, CTR_MEMORY_U24_MAX]
-      });
-    }
-
-    if (this._offset + CTR_MEMORY_U24_SIZE > this.capacity) {
-      if (options?.grow === undefined ? !this._options.growth : !options.grow) {
-        if (options?.lenient || this._options.lenient) {
-          this._lastwritten = 0;
-          return this;
-        }
-
-        throw new CTRMemoryOOBError({
-          buffer: this,
-          action: "write",
-          datatype: "u24",
-          offset: this._offset
-        });
-      }
-
-      this._grow(this._offset + CTR_MEMORY_U24_SIZE);
-    }
-
-    (options?.endianness || this._options.endianness) === "BE"
-      ? this._memory.writeUIntBE(value, this._offset, 3)
-      : this._memory.writeUIntLE(value, this._offset, 3);
-
-    this._lastwritten = CTR_MEMORY_U24_SIZE;
-
-    if (this._offset + this._lastwritten > this._size) {
-      this._size = this._offset + this._lastwritten;
-    }
-
-    this._offset += this._lastwritten;
-    return this;
+    return this._writeNumeric("u24", value, options);
   }
 
   public writeF32(value: number, options?: CTRMemoryNumericWriteOptions): this {
-    this._lastwritten = NaN;
-    this._lazyalloc();
-
-    if (this._offset + CTR_MEMORY_F32_SIZE > this.capacity) {
-      if (options?.grow === undefined ? !this._options.growth : !options.grow) {
-        if (options?.lenient || this._options.lenient) {
-          this._lastwritten = 0;
-          return this;
-        }
-
-        throw new CTRMemoryOOBError({
-          buffer: this,
-          action: "write",
-          datatype: "f32",
-          offset: this._offset
-        });
-      }
-
-      this._grow(this._offset + CTR_MEMORY_F32_SIZE);
-    }
-
-    (options?.endianness || this._options.endianness) === "BE"
-      ? this._memory.writeFloatBE(value, this._offset)
-      : this._memory.writeFloatLE(value, this._offset);
-
-    this._lastwritten = CTR_MEMORY_F32_SIZE;
-
-    if (this._offset + this._lastwritten > this._size) {
-      this._size = this._offset + this._lastwritten;
-    }
-
-    this._offset += this._lastwritten;
-    return this;
+    return this._writeNumeric("f32", value, options);
   }
 
   public writeI32(value: number, options?: CTRMemoryNumericWriteOptions): this {
-    this._lastwritten = NaN;
-    this._lazyalloc();
-
-    if (value < CTR_MEMORY_I32_MIN || value > CTR_MEMORY_I32_MAX) {
-      throw new CTRMemoryOutOfRangeError({
-        buffer: this,
-        value: value,
-        datatype: "i32",
-        range: [CTR_MEMORY_I32_MIN, CTR_MEMORY_I32_MAX]
-      });
-    }
-
-    if (this._offset + CTR_MEMORY_I32_SIZE > this.capacity) {
-      if (options?.grow === undefined ? !this._options.growth : !options.grow) {
-        if (options?.lenient || this._options.lenient) {
-          this._lastwritten = 0;
-          return this;
-        }
-
-        throw new CTRMemoryOOBError({
-          buffer: this,
-          action: "write",
-          datatype: "i32",
-          offset: this._offset
-        });
-      }
-
-      this._grow(this._offset + CTR_MEMORY_I32_SIZE);
-    }
-
-    (options?.endianness || this._options.endianness) === "BE"
-      ? this._memory.writeInt32BE(value, this._offset)
-      : this._memory.writeInt32LE(value, this._offset);
-
-    this._lastwritten = CTR_MEMORY_I32_SIZE;
-
-    if (this._offset + this._lastwritten > this._size) {
-      this._size = this._offset + this._lastwritten;
-    }
-
-    this._offset += this._lastwritten;
-    return this;
+    return this._writeNumeric("i32", value, options);
   }
 
   public writeU32(value: number, options?: CTRMemoryNumericWriteOptions): this {
-    this._lastwritten = NaN;
-    this._lazyalloc();
-
-    if (value < CTR_MEMORY_U32_MIN || value > CTR_MEMORY_U32_MAX) {
-      throw new CTRMemoryOutOfRangeError({
-        buffer: this,
-        value: value,
-        datatype: "u32",
-        range: [CTR_MEMORY_U32_MIN, CTR_MEMORY_U32_MAX]
-      });
-    }
-
-    if (this._offset + CTR_MEMORY_U32_SIZE > this.capacity) {
-      if (options?.grow === undefined ? !this._options.growth : !options.grow) {
-        if (options?.lenient || this._options.lenient) {
-          this._lastwritten = 0;
-          return this;
-        }
-
-        throw new CTRMemoryOOBError({
-          buffer: this,
-          action: "write",
-          datatype: "u32",
-          offset: this._offset
-        });
-      }
-
-      this._grow(this._offset + CTR_MEMORY_U32_SIZE);
-    }
-
-    (options?.endianness || this._options.endianness) === "BE"
-      ? this._memory.writeUInt32BE(value, this._offset)
-      : this._memory.writeUInt32LE(value, this._offset);
-
-    this._lastwritten = CTR_MEMORY_U32_SIZE;
-
-    if (this._offset + this._lastwritten > this._size) {
-      this._size = this._offset + this._lastwritten;
-    }
-
-    this._offset += this._lastwritten;
-    return this;
+    return this._writeNumeric("u32", value, options);
   }
 
   public writeI40(value: number, options?: CTRMemoryNumericWriteOptions): this {
-    this._lastwritten = NaN;
-    this._lazyalloc();
-
-    if (value < CTR_MEMORY_I40_MIN || value > CTR_MEMORY_I40_MAX) {
-      throw new CTRMemoryOutOfRangeError({
-        buffer: this,
-        value: value,
-        datatype: "i40",
-        range: [CTR_MEMORY_I40_MIN, CTR_MEMORY_I40_MAX]
-      });
-    }
-
-    if (this._offset + CTR_MEMORY_I40_SIZE > this.capacity) {
-      if (options?.grow === undefined ? !this._options.growth : !options.grow) {
-        if (options?.lenient || this._options.lenient) {
-          this._lastwritten = 0;
-          return this;
-        }
-
-        throw new CTRMemoryOOBError({
-          buffer: this,
-          action: "write",
-          datatype: "i40",
-          offset: this._offset
-        });
-      }
-
-      this._grow(this._offset + CTR_MEMORY_I40_SIZE);
-    }
-
-    (options?.endianness || this._options.endianness) === "BE"
-      ? this._memory.writeIntBE(value, this._offset, 5)
-      : this._memory.writeIntLE(value, this._offset, 5);
-
-    this._lastwritten = CTR_MEMORY_I40_SIZE;
-
-    if (this._offset + this._lastwritten > this._size) {
-      this._size = this._offset + this._lastwritten;
-    }
-
-    this._offset += this._lastwritten;
-    return this;
+    return this._writeNumeric("i40", value, options);
   }
 
   public writeU40(value: number, options?: CTRMemoryNumericWriteOptions): this {
-    this._lastwritten = NaN;
-    this._lazyalloc();
-
-    if (value < CTR_MEMORY_U40_MIN || value > CTR_MEMORY_U40_MAX) {
-      throw new CTRMemoryOutOfRangeError({
-        buffer: this,
-        value: value,
-        datatype: "u40",
-        range: [CTR_MEMORY_U40_MIN, CTR_MEMORY_U40_MAX]
-      });
-    }
-
-    if (this._offset + CTR_MEMORY_U40_SIZE > this.capacity) {
-      if (options?.grow === undefined ? !this._options.growth : !options.grow) {
-        if (options?.lenient || this._options.lenient) {
-          this._lastwritten = 0;
-          return this;
-        }
-
-        throw new CTRMemoryOOBError({
-          buffer: this,
-          action: "write",
-          datatype: "u40",
-          offset: this._offset
-        });
-      }
-
-      this._grow(this._offset + CTR_MEMORY_U40_SIZE);
-    }
-
-    (options?.endianness || this._options.endianness) === "BE"
-      ? this._memory.writeUIntBE(value, this._offset, 5)
-      : this._memory.writeUIntLE(value, this._offset, 5);
-
-    this._lastwritten = CTR_MEMORY_U40_SIZE;
-
-    if (this._offset + this._lastwritten > this._size) {
-      this._size = this._offset + this._lastwritten;
-    }
-
-    this._offset += this._lastwritten;
-    return this;
+    return this._writeNumeric("u40", value, options);
   }
 
   public writeI48(value: number, options?: CTRMemoryNumericWriteOptions): this {
-    this._lastwritten = NaN;
-    this._lazyalloc();
-
-    if (value < CTR_MEMORY_I48_MIN || value > CTR_MEMORY_I48_MAX) {
-      throw new CTRMemoryOutOfRangeError({
-        buffer: this,
-        value: value,
-        datatype: "i48",
-        range: [CTR_MEMORY_I48_MIN, CTR_MEMORY_I48_MAX]
-      });
-    }
-
-    if (this._offset + CTR_MEMORY_I48_SIZE > this.capacity) {
-      if (options?.grow === undefined ? !this._options.growth : !options.grow) {
-        if (options?.lenient || this._options.lenient) {
-          this._lastwritten = 0;
-          return this;
-        }
-
-        throw new CTRMemoryOOBError({
-          buffer: this,
-          action: "write",
-          datatype: "i48",
-          offset: this._offset
-        });
-      }
-
-      this._grow(this._offset + CTR_MEMORY_I48_SIZE);
-    }
-
-    (options?.endianness || this._options.endianness) === "BE"
-      ? this._memory.writeIntBE(value, this._offset, 6)
-      : this._memory.writeIntLE(value, this._offset, 6);
-
-    this._lastwritten = CTR_MEMORY_I48_SIZE;
-
-    if (this._offset + this._lastwritten > this._size) {
-      this._size = this._offset + this._lastwritten;
-    }
-
-    this._offset += this._lastwritten;
-    return this;
+    return this._writeNumeric("i48", value, options);
   }
 
   public writeU48(value: number, options?: CTRMemoryNumericWriteOptions): this {
-    this._lastwritten = NaN;
-    this._lazyalloc();
-
-    if (value < CTR_MEMORY_U48_MIN || value > CTR_MEMORY_U48_MAX) {
-      throw new CTRMemoryOutOfRangeError({
-        buffer: this,
-        value: value,
-        datatype: "u48",
-        range: [CTR_MEMORY_U48_MIN, CTR_MEMORY_U48_MAX]
-      });
-    }
-
-    if (this._offset + CTR_MEMORY_U48_SIZE > this.capacity) {
-      if (options?.grow === undefined ? !this._options.growth : !options.grow) {
-        if (options?.lenient || this._options.lenient) {
-          this._lastwritten = 0;
-          return this;
-        }
-
-        throw new CTRMemoryOOBError({
-          buffer: this,
-          action: "write",
-          datatype: "u48",
-          offset: this._offset
-        });
-      }
-
-      this._grow(this._offset + CTR_MEMORY_U48_SIZE);
-    }
-
-    (options?.endianness || this._options.endianness) === "BE"
-      ? this._memory.writeUIntBE(value, this._offset, 6)
-      : this._memory.writeUIntLE(value, this._offset, 6);
-
-    this._lastwritten = CTR_MEMORY_U48_SIZE;
-
-    if (this._offset + this._lastwritten > this._size) {
-      this._size = this._offset + this._lastwritten;
-    }
-
-    this._offset += this._lastwritten;
-    return this;
+    return this._writeNumeric("u48", value, options);
   }
 
   public writeF64(value: number, options?: CTRMemoryNumericWriteOptions): this {
-    this._lastwritten = NaN;
-    this._lazyalloc();
-
-    if (this._offset + CTR_MEMORY_F64_SIZE > this.capacity) {
-      if (options?.grow === undefined ? !this._options.growth : !options.grow) {
-        if (options?.lenient || this._options.lenient) {
-          this._lastwritten = 0;
-          return this;
-        }
-
-        throw new CTRMemoryOOBError({
-          buffer: this,
-          action: "write",
-          datatype: "f64",
-          offset: this._offset
-        });
-      }
-
-      this._grow(this._offset + CTR_MEMORY_F64_SIZE);
-    }
-
-    (options?.endianness || this._options.endianness) === "BE"
-      ? this._memory.writeFloatBE(value, this._offset)
-      : this._memory.writeFloatLE(value, this._offset);
-
-    this._lastwritten = CTR_MEMORY_F64_SIZE;
-
-    if (this._offset + this._lastwritten > this._size) {
-      this._size = this._offset + this._lastwritten;
-    }
-
-    this._offset += this._lastwritten;
-    return this;
+    return this._writeNumeric("f64", value, options);
   }
 
   public writeI64(
     value: bigint | number,
     options?: CTRMemoryNumericWriteOptions
   ): this {
-    this._lastwritten = NaN;
-    this._lazyalloc();
-
-    if (value < CTR_MEMORY_I64_MIN || value > CTR_MEMORY_I64_MAX) {
-      throw new CTRMemoryOutOfRangeError({
-        buffer: this,
-        value: value,
-        datatype: "i64",
-        range: [CTR_MEMORY_I64_MIN, CTR_MEMORY_I64_MAX]
-      });
-    }
-
-    if (this._offset + CTR_MEMORY_I64_SIZE > this.capacity) {
-      if (options?.grow === undefined ? !this._options.growth : !options.grow) {
-        if (options?.lenient || this._options.lenient) {
-          this._lastwritten = 0;
-          return this;
-        }
-
-        throw new CTRMemoryOOBError({
-          buffer: this,
-          action: "write",
-          datatype: "i64",
-          offset: this._offset
-        });
-      }
-
-      this._grow(this._offset + CTR_MEMORY_I64_SIZE);
-    }
-
-    (options?.endianness || this._options.endianness) === "BE"
-      ? this._memory.writeBigInt64BE(BigInt(value), this._offset)
-      : this._memory.writeBigInt64LE(BigInt(value), this._offset);
-
-    this._lastwritten = CTR_MEMORY_I64_SIZE;
-
-    if (this._offset + this._lastwritten > this._size) {
-      this._size = this._offset + this._lastwritten;
-    }
-
-    this._offset += this._lastwritten;
-    return this;
+    return this._writeNumeric("i64", value, options);
   }
 
   public writeU64(
     value: bigint | number,
     options?: CTRMemoryNumericWriteOptions
   ): this {
-    this._lastwritten = NaN;
-    this._lazyalloc();
-
-    if (value < CTR_MEMORY_U64_MIN || value > CTR_MEMORY_U64_MAX) {
-      throw new CTRMemoryOutOfRangeError({
-        buffer: this,
-        value: value,
-        datatype: "u64",
-        range: [CTR_MEMORY_U64_MIN, CTR_MEMORY_U64_MAX]
-      });
-    }
-
-    if (this._offset + CTR_MEMORY_U64_SIZE > this.capacity) {
-      if (options?.grow === undefined ? !this._options.growth : !options.grow) {
-        if (options?.lenient || this._options.lenient) {
-          this._lastwritten = 0;
-          return this;
-        }
-
-        throw new CTRMemoryOOBError({
-          buffer: this,
-          action: "write",
-          datatype: "u64",
-          offset: this._offset
-        });
-      }
-
-      this._grow(this._offset + CTR_MEMORY_U64_SIZE);
-    }
-
-    (options?.endianness || this._options.endianness) === "BE"
-      ? this._memory.writeBigUInt64BE(BigInt(value), this._offset)
-      : this._memory.writeBigUInt64LE(BigInt(value), this._offset);
-
-    this._lastwritten = CTR_MEMORY_U64_SIZE;
-
-    if (this._offset + this._lastwritten > this._size) {
-      this._size = this._offset + this._lastwritten;
-    }
-
-    this._offset += this._lastwritten;
-    return this;
+    return this._writeNumeric("u64", value, options);
   }
 
   public deallocate(): void {
+    this._check();
+
     this._size = 0;
     this._used = true;
     this._offset = NaN;
@@ -3066,27 +2039,20 @@ class CTRMemory {
     const start = this._offset;
     const count = options?.count;
 
-    if (this._offset + 1 > this._size) {
-      if (count !== undefined && count !== 0) {
-        throw new CTRMemoryCountFailError({
-          count,
-          actual: 0,
-          buffer: this,
-          action: "read"
-        });
-      }
-
-      if (options?.lenient || this._options.lenient) {
-        this._lastread = 0;
-        return "";
-      }
-
-      throw new CTRMemoryOOBError({
-        buffer: this,
-        action: "read",
-        datatype: "string",
-        offset: this._offset
-      });
+    if (
+      !CTRMemory._validateSizeofOrGrow(
+        this,
+        1,
+        "read",
+        "string",
+        count,
+        0,
+        false,
+        options
+      )
+    ) {
+      this._lastread = 0;
+      return "";
     }
 
     let string: string;
@@ -3111,9 +2077,11 @@ class CTRMemory {
             : _terminator;
 
       if (terminator === undefined) {
-        throw new CTRMemoryError(
-          CTRMemoryError.ERR_INVALID_ARGUMENT,
-          { buffer: this },
+        throw new CTRMemoryInvalidOperationError(
+          this,
+          null,
+          "read",
+          "string",
           "unable to read string; terminator is undefined but count was not given"
         );
       }
@@ -3125,14 +2093,14 @@ class CTRMemory {
           this._offset + Math.min(limit, chunks, this.capacity - this._offset);
 
         const subarray = this._memory.subarray(this._offset, end);
-        const chunk = _decode(this, subarray, encoding, endianness);
+        const chunk = CTRMemory._decode(this, subarray, encoding, endianness);
         const terminatorIndex = chunk.indexOf(terminator);
 
         if (terminatorIndex !== -1) {
           const substring = chunk.slice(0, terminatorIndex);
           string += substring;
 
-          this._offset += _encode(
+          this._offset += CTRMemory._encode(
             this,
             substring + terminator,
             encoding,
@@ -3152,17 +2120,9 @@ class CTRMemory {
       );
 
       this._offset += subarray.length;
+      CTRMemory._validateCount(this, count, subarray.length, "read");
 
-      if (subarray.length !== count) {
-        throw new CTRMemoryCountFailError({
-          count,
-          buffer: this,
-          action: "read",
-          actual: subarray.length
-        });
-      }
-
-      string = _decode(this, subarray, encoding, endianness);
+      string = CTRMemory._decode(this, subarray, encoding, endianness);
     }
 
     const strip = options?.strip !== undefined ? options?.strip : true;
@@ -3182,14 +2142,6 @@ class CTRMemory {
   }
 
   public reallocate(size?: number): this {
-    if (typeof size !== "number" && size !== undefined) {
-      throw new CTRMemoryError(
-        CTRMemoryError.ERR_INVALID_ARGUMENT,
-        { buffer: this },
-        `expected ${size} to be a number or undefined but got ${size} instead`
-      );
-    }
-
     if (size === undefined) {
       size = this.capacity;
     }
@@ -3209,57 +2161,58 @@ class CTRMemory {
     this._lazyalloc();
 
     const start = this._offset;
-    const full = options?.full;
     const count = options?.count;
     const limit = options?.limit || Infinity;
+    const partial = Boolean(options?.partial);
     const endianness = options?.endianness || this.endianness;
     const encoding = options?.encoding || this._options.encoding;
     const _terminator = options?.terminator || this._options.terminator;
-
-    const growth =
-      options?.grow === undefined ? this._options.growth : options.grow;
 
     const terminator =
       typeof _terminator === "boolean"
         ? _terminator === true
           ? Buffer.from(
-              _source(this, CTR_MEMORY_DEFAULT_TERMINATOR, encoding, endianness)
+              CTRMemory._source(
+                this,
+                CTR_MEMORY_DEFAULT_TERMINATOR,
+                encoding,
+                endianness
+              )
             )
           : undefined
-        : Buffer.from(_source(this, _terminator, encoding, endianness));
+        : Buffer.from(
+            CTRMemory._source(this, _terminator, encoding, endianness)
+          );
 
     const terminatorsize = terminator !== undefined ? terminator.length : 0;
-    const buffer = _encode(this, value, encoding, endianness);
+    const buffer = CTRMemory._encode(this, value, encoding, endianness);
 
     const subarray = buffer.subarray(
       0,
       Math.min(limit - terminatorsize, buffer.length)
     );
 
-    if (this._offset + subarray.length + terminatorsize > this.capacity) {
-      if (growth) {
-        this._grow(this._offset + subarray.length + terminatorsize);
-      } else if (count !== undefined) {
-        throw new CTRMemoryCountFailError({
-          count,
-          actual: 0,
-          buffer: this,
-          action: "write"
-        });
-      } else if (full) {
-        throw new CTRMemoryOOBError({
-          buffer: this,
-          action: "write",
-          datatype: "string",
-          offset: this._offset
-        });
-      }
+    if (
+      (!partial || count !== undefined) &&
+      !CTRMemory._validateSizeofOrGrow(
+        this,
+        subarray.length + terminatorsize,
+        "write",
+        "string",
+        count,
+        0,
+        true,
+        options
+      )
+    ) {
+      this._lastwritten = 0;
+      return this;
     }
 
     let written = subarray.copy(this._memory, this._offset);
 
-    if (this._offset + subarray.length > this._size) {
-      this._size = this._offset + subarray.length;
+    if (this._offset + written > this._size) {
+      this._size = this._offset + written;
     }
 
     this._offset += written;
@@ -3268,8 +2221,8 @@ class CTRMemory {
     if (terminator !== undefined) {
       written = terminator.copy(this._memory, this._offset);
 
-      if (this._offset + terminator.length > this._size) {
-        this._size = this._offset + terminator.length;
+      if (this._offset + written > this._size) {
+        this._size = this._offset + written;
       }
 
       this._offset += written;
@@ -3286,21 +2239,23 @@ class CTRMemory {
     ) {
       const size = count - this._lastwritten;
 
-      if (this._offset + size > this.capacity) {
-        if (growth) {
-          this._grow(this._offset + size);
-        } else if (count !== undefined) {
-          throw new CTRMemoryCountFailError({
-            count,
-            buffer: this,
-            action: "write",
-            actual: subarray.length
-          });
-        }
+      if (
+        !CTRMemory._validateSizeofOrGrow(
+          this,
+          size,
+          "write",
+          "string",
+          count,
+          this._lastwritten,
+          true,
+          options
+        )
+      ) {
+        return this;
       }
 
       this._memory.fill(
-        _source(this, padding, encoding, endianness),
+        CTRMemory._source(this, padding, encoding, endianness),
         this._offset,
         this._offset + size
       );
@@ -3313,15 +2268,7 @@ class CTRMemory {
       this._lastwritten += size;
     }
 
-    if (count !== undefined && this._lastwritten !== count) {
-      throw new CTRMemoryCountFailError({
-        count,
-        buffer: this,
-        action: "write",
-        actual: this._lastwritten
-      });
-    }
-
+    CTRMemory._validateCount(this, count, this._lastwritten, "write");
     return this;
   }
 
@@ -3329,14 +2276,30 @@ class CTRMemory {
     endianness: CTRMemoryEndianness,
     fn: (buf: this) => T
   ): T {
+    this._check();
+
     const oldEndianness = this._options.endianness;
-    this._options.endianness = _normalizeEndianness(this, endianness);
+    this._options.endianness = CTRMemory.normalizeEndianness(this, endianness);
 
     try {
       return fn(this);
     } finally {
       this._options.endianness = oldEndianness;
     }
+  }
+
+  public _grow(size: number): this {
+    this._lazyalloc();
+
+    if (this.capacity >= size) {
+      return this;
+    }
+
+    this._reallocate(
+      Math.max(size, Math.ceil(this.capacity * this._options.growth))
+    );
+
+    return this;
   }
 
   private _init(
@@ -3370,12 +2333,17 @@ class CTRMemory {
     this._lazyoptions.fill = options.fill;
 
     if (source !== undefined) {
-      const sourcebuf = _source(this, source, encoding, this.endianness);
+      const sourcebuf = CTRMemory._source(
+        this,
+        source,
+        encoding,
+        this.endianness
+      );
 
-      const terminatorbuf = _issource(this.terminator)
-        ? _source(this, this.terminator, encoding, this.endianness)
+      const terminatorbuf = CTRMemory.isSource(this.terminator)
+        ? CTRMemory._source(this, this.terminator, encoding, this.endianness)
         : this.terminator === true
-          ? _source(
+          ? CTRMemory._source(
               this,
               CTR_MEMORY_DEFAULT_TERMINATOR,
               encoding,
@@ -3403,24 +2371,14 @@ class CTRMemory {
     }
   }
 
-  private _grow(size: number): this {
-    this._lazyalloc();
-
-    if (this.capacity >= size) {
-      return this;
+  private _check(): void {
+    if (this._used) {
+      throw new CTRMemoryUsedError(this);
     }
-
-    this._reallocate(
-      Math.max(size, Math.ceil(this.capacity * this._options.growth))
-    );
-
-    return this;
   }
 
   private _lazyalloc(): Buffer {
-    if (this._used) {
-      throw new CTRMemoryUsedError();
-    }
+    this._check();
 
     if (!this._allocated) {
       this._reallocate(this._lazyoptions?.size || 0);
@@ -3428,7 +2386,7 @@ class CTRMemory {
 
       if (fill !== undefined) {
         this._memory.fill(
-          _source(this, fill, this._options.encoding, this.endianness)
+          CTRMemory._source(this, fill, this._options.encoding, this.endianness)
         );
       }
 
@@ -3440,29 +2398,101 @@ class CTRMemory {
     return this._memory;
   }
 
-  private _reallocate(size: number): void {
-    if (this._used) {
-      throw new CTRMemoryUsedError();
+  private _readNumeric(
+    type: "i64" | "u64",
+    options?: CTRMemoryNumericReadOptions
+  ): bigint;
+
+  private _readNumeric(
+    type: Exclude<CTRMemoryDataType, "raw" | "string">,
+    options?: CTRMemoryNumericReadOptions
+  ): number;
+
+  private _readNumeric(
+    type: Exclude<CTRMemoryDataType, "raw" | "string">,
+    options?: CTRMemoryNumericReadOptions
+  ): bigint | number {
+    this._lastread = NaN;
+    this._lazyalloc();
+
+    const sizeof = CTRMemory.sizeof(type);
+
+    if (
+      !CTRMemory._validateSizeofOrGrow(
+        this,
+        sizeof,
+        "read",
+        type,
+        undefined,
+        0,
+        false,
+        options
+      )
+    ) {
+      this._lastread = 0;
+      return 0;
     }
+
+    const endianness =
+      options?.endianness !== undefined
+        ? CTRMemory.normalizeEndianness(this, options.endianness)
+        : this._options.endianness;
+
+    let read: bigint | number;
+
+    if (type === "i64") {
+      read = (
+        endianness === "BE"
+          ? this.buffer.readBigInt64BE
+          : this.buffer.readBigInt64LE
+      ).bind(this.buffer)(this._offset);
+    } else if (type === "u64") {
+      read = (
+        endianness === "BE"
+          ? this.buffer.readBigUInt64BE
+          : this.buffer.readBigUInt64LE
+      ).bind(this.buffer)(this._offset);
+    } else if (type === "f64") {
+      read = (
+        endianness === "BE"
+          ? this.buffer.readDoubleBE
+          : this.buffer.readDoubleLE
+      ).bind(this.buffer)(this._offset);
+    } else if (type === "f32") {
+      read = (
+        endianness === "BE" ? this.buffer.readFloatBE : this.buffer.readFloatLE
+      ).bind(this.buffer)(this._offset);
+    } else {
+      read = (
+        endianness === "BE" ? this.buffer.readIntBE : this.buffer.readIntLE
+      ).bind(this.buffer)(this._offset, sizeof);
+    }
+
+    this._lastread = sizeof;
+    this._offset += this._lastread;
+
+    return read;
+  }
+
+  private _reallocate(size: number): void {
+    this._check();
 
     if (!Number.isInteger(size)) {
       throw new CTRMemoryOutOfRangeError(
-        {
-          value: size,
-          buffer: this,
-          range: [1, Infinity]
-        },
+        this,
+        size,
+        null,
+        [1, CTRMemory.MAX_LENGTH],
         `expected size to be an integer but got ${size} instead`
       );
     }
 
     if (size < 0 || size > MAX_LENGTH) {
       throw new CTRMemoryOutOfRangeError(
-        {
-          value: size,
-          buffer: this,
-          range: [1, MAX_LENGTH]
-        },
+        this,
+        size,
+        null,
+        [1, CTRMemory.MAX_LENGTH],
         `size must be between 0 and ${MAX_LENGTH} but got ${size} instead`
       );
     }
@@ -3474,114 +2504,76 @@ class CTRMemory {
       this._memory = other;
     } catch (err) {
       throw new CTRMemoryError(
+        this,
         CTRMemoryError.ERR_OUT_OF_MEMORY,
-        { buffer: this },
         "ran out of memory",
         err
       );
     }
   }
+
+  private _writeNumeric(
+    type: Exclude<CTRMemoryDataType, "raw" | "string">,
+    value: bigint | number,
+    options?: CTRMemoryNumericWriteOptions
+  ): this {
+    this._lastwritten = NaN;
+    this._lazyalloc();
+
+    CTRMemory._validateRange(this, type, value);
+
+    const sizeof = CTRMemory.sizeof(type);
+
+    if (
+      !CTRMemory._validateSizeofOrGrow(
+        this,
+        sizeof,
+        "write",
+        type,
+        undefined,
+        0,
+        true,
+        options
+      )
+    ) {
+      this._lastwritten = 0;
+      return this;
+    }
+
+    const endianness = options?.endianness || this._options.endianness;
+
+    if (type === "i64") {
+      endianness === "BE"
+        ? this._memory.writeBigInt64BE(<bigint>value, this._offset)
+        : this._memory.writeBigInt64LE(<bigint>value, this._offset);
+    } else if (type === "u64") {
+      endianness === "BE"
+        ? this._memory.writeBigUInt64BE(<bigint>value, this._offset)
+        : this._memory.writeBigUInt64LE(<bigint>value, this._offset);
+    } else if (type === "f32") {
+      endianness === "BE"
+        ? this._memory.writeFloatBE(<number>value, this._offset)
+        : this._memory.writeFloatLE(<number>value, this._offset);
+    } else if (type === "f64") {
+      endianness === "BE"
+        ? this._memory.writeDoubleBE(<number>value, this._offset)
+        : this._memory.writeDoubleLE(<number>value, this._offset);
+    } else {
+      endianness === "BE"
+        ? this._memory.writeIntBE(<number>value, this._offset, sizeof)
+        : this._memory.writeIntLE(<number>value, this._offset, sizeof);
+    }
+
+    this._lastwritten = sizeof;
+
+    if (this._offset + this._lastwritten > this._size) {
+      this._size = this._offset + this._lastwritten;
+    }
+
+    this._offset += this._lastwritten;
+    return this;
+  }
 }
-
-const _source = (
-  buffer: CTRMemory,
-  source: CTRMemorySource,
-  encoding: CTRMemoryEncoding,
-  endianness: CTRMemoryEndianness
-): Uint8Array =>
-  source instanceof Uint8Array
-    ? source
-    : source instanceof CTRMemory
-      ? source.buffer
-      : typeof source === "string"
-        ? _encode(buffer, source, encoding, endianness)
-        : typeof source === "object"
-          ? new Uint8Array(source)
-          : new Uint8Array([source]);
-
-const _issource = (value: unknown): value is CTRMemorySource =>
-  Array.isArray(value) ||
-  value instanceof CTRMemory ||
-  typeof value === "string" ||
-  typeof value === "number" ||
-  value instanceof Uint8Array;
-
-const _normalizeEndianness = (
-  buffer: CTRMemory,
-  endianness: string
-): CTRMemoryEndianness => {
-  let _endianness = endianness.toUpperCase();
-
-  if (_endianness === "BE" || _endianness === "LE") {
-    return _endianness;
-  }
-
-  throw new CTRMemoryError(
-    CTRMemoryError.ERR_INVALID_ARGUMENT,
-    { buffer },
-    `unknown endianness '${endianness}'`
-  );
-};
-
-const _normalizeEncoding = (
-  buffer: CTRMemory | undefined,
-  encoding: string,
-  endianness: CTRMemoryEndianness
-): "utf16be" | BufferEncoding => {
-  let _encoding = encoding.toLowerCase().replace(/[^0-9a-z]/g, "");
-
-  if (_encoding === "utf16") {
-    _encoding += endianness.toLowerCase();
-  }
-
-  if (_encoding !== "utf16be" && !Buffer.isEncoding(_encoding)) {
-    throw new CTRMemoryUnsupportedEncodingError({ buffer, encoding });
-  }
-
-  return _encoding;
-};
-
-const _decode = (
-  buffer: CTRMemory,
-  input: Buffer,
-  encoding: string,
-  endianness: CTRMemoryEndianness
-): string => {
-  const _encoding = _normalizeEncoding(buffer, encoding, endianness);
-
-  if (_encoding === "utf16be") {
-    const tmp = Buffer.from(input);
-
-    for (let i = 0; i + 1 < buffer.length; i += CTR_MEMORY_U16_SIZE) {
-      tmp.writeUInt16LE(tmp.readUint16BE(i), i);
-    }
-
-    return tmp.toString("utf16le");
-  }
-
-  return input.toString(_encoding);
-};
-
-const _encode = (
-  buffer: CTRMemory,
-  string: string,
-  encoding: string,
-  endianness: CTRMemoryEndianness
-): Buffer => {
-  const _encoding = _normalizeEncoding(buffer, encoding, endianness);
-
-  if (_encoding === "utf16be") {
-    const buffer = Buffer.from(string, "utf16le");
-
-    for (let i = 0; i + 1 < buffer.length; i += CTR_MEMORY_U16_SIZE) {
-      buffer.writeUInt16BE(buffer.readUint16LE(i), i);
-    }
-
-    return buffer;
-  }
-
-  return Buffer.from(string, _encoding);
-};
 
 export { CTRMemory, CTRMemory as Memory };
 

@@ -3,6 +3,8 @@ import type { CTRMemory } from "@libctr/memory";
 import type { CTRVersion } from "#version/version";
 
 type CTRDARCErrorCode =
+  | typeof CTRDARCError.ERR_BUILD
+  | typeof CTRDARCError.ERR_PARSE
   | typeof CTRDARCError.ERR_UNKNOWN
   | typeof CTRDARCError.ERR_INVALID_STATE
   | typeof CTRDARCError.ERR_INVALID_HEADER
@@ -12,26 +14,9 @@ type CTRDARCErrorCode =
   | typeof CTRDARCError.ERR_UNEXPECTED_END_OF_FILE
   | typeof CTRDARCError.ERR_ROOT_IS_NOT_A_DIRECTORY;
 
-interface CTRDARCErrorMetadata {
-  state?: unknown;
-  buffer?: CTRMemory;
-  version?: CTRVersion;
-}
-
-class CTRDARCError<
-  C extends CTRDARCErrorCode = CTRDARCErrorCode,
-  M extends CTRDARCErrorMetadata = CTRDARCErrorMetadata
-> extends CTRError<C, M> {
-  public static is<C extends CTRDARCErrorCode>(
-    value: unknown,
-    code?: C
-  ): value is CTRDARCError<C> {
-    return (
-      value instanceof CTRDARCError &&
-      (code === undefined || value.code === code)
-    );
-  }
-
+class CTRDARCError extends CTRError {
+  public static readonly ERR_BUILD = "darc.err_build";
+  public static readonly ERR_PARSE = "darc.err_parse";
   public static readonly ERR_UNKNOWN = "darc.err_unknown";
   public static readonly ERR_INVALID_STATE = "darc.err_invalid_state";
   public static readonly ERR_INVALID_HEADER = "darc.err_invalid_header";
@@ -46,53 +31,73 @@ class CTRDARCError<
 
   public static readonly ERR_ROOT_IS_NOT_A_DIRECTORY =
     "darc.err_root_is_not_a_directory";
-}
 
-interface CTRDARCInvalidStateErrorMetadata
-  extends Pick<Required<CTRDARCErrorMetadata>, "state"> {}
+  public override readonly code: null | CTRDARCErrorCode;
 
-class CTRDARCInvalidStateError extends CTRDARCError<
-  typeof CTRDARCError.ERR_INVALID_STATE,
-  CTRDARCInvalidStateErrorMetadata
-> {
   public constructor(
-    metadata: CTRDARCInvalidStateErrorMetadata,
+    code: null | CTRDARCErrorCode,
     message?: string,
     cause?: unknown
   ) {
-    super(
-      CTRDARCError.ERR_INVALID_STATE,
-      metadata,
-      message || `Invalid state '${metadata.state}'`,
-      cause
-    );
+    super(null, message, cause);
+    this.code = code;
   }
 }
 
-interface CTRDARCUnsupportedVersionErrorMetadata
-  extends Pick<Required<CTRDARCErrorMetadata>, "buffer" | "version"> {}
+type CTRDARCFormatErrorCode =
+  | typeof CTRDARCError.ERR_BUILD
+  | typeof CTRDARCError.ERR_PARSE;
 
-class CTRDARCUnsupportedVersionError extends CTRDARCError<
-  typeof CTRDARCError.ERR_UNSUPPORTED_VERSION,
-  CTRDARCUnsupportedVersionErrorMetadata
-> {
+class CTRDARCFormatError extends CTRDARCError {
+  public readonly buffer: CTRMemory;
+  public override readonly code: CTRDARCFormatErrorCode;
+
   public constructor(
-    metadata: CTRDARCUnsupportedVersionErrorMetadata,
+    code: CTRDARCFormatErrorCode,
+    buffer: CTRMemory,
     message?: string,
     cause?: unknown
   ) {
+    super(null, message, cause);
+
+    this.code = code;
+    this.buffer = buffer;
+  }
+}
+
+class CTRDARCInvalidStateError extends CTRDARCError {
+  public readonly state: unknown;
+  public override readonly code: typeof CTRDARCError.ERR_INVALID_STATE;
+
+  public constructor(state: unknown, message?: string, cause?: unknown) {
+    super(null, message || `Invalid state '${state}'`, cause);
+
+    this.state = state;
+    this.code = CTRDARCError.ERR_INVALID_STATE;
+  }
+}
+
+class CTRDARCUnsupportedVersionError extends CTRDARCError {
+  public readonly version: CTRVersion;
+  public override readonly code: typeof CTRDARCError.ERR_UNSUPPORTED_VERSION;
+
+  public constructor(version: CTRVersion, message?: string, cause?: unknown) {
     super(
-      CTRDARCError.ERR_UNSUPPORTED_VERSION,
-      metadata,
-      message || `version ${metadata.version.toString()} is not supported`,
+      null,
+      message || `version ${version.toString()} is not supported`,
       cause
     );
+
+    this.version = version;
+    this.code = CTRDARCError.ERR_UNSUPPORTED_VERSION;
   }
 }
 
 export {
   CTRDARCError,
   CTRDARCError as DARCError,
+  CTRDARCFormatError,
+  CTRDARCFormatError as DARCFormatError,
   CTRDARCInvalidStateError,
   CTRDARCInvalidStateError as DARCInvalidStateError,
   CTRDARCUnsupportedVersionError,
@@ -102,10 +107,6 @@ export {
 export type {
   CTRDARCErrorCode,
   CTRDARCErrorCode as DARCErrorCode,
-  CTRDARCErrorMetadata,
-  CTRDARCErrorMetadata as DARCErrorMetadata,
-  CTRDARCInvalidStateErrorMetadata,
-  CTRDARCInvalidStateErrorMetadata as DARCInvalidStateErrorMetadata,
-  CTRDARCUnsupportedVersionErrorMetadata,
-  CTRDARCUnsupportedVersionErrorMetadata as DARCUnsupportedVersionErrorMetadata
+  CTRDARCFormatErrorCode,
+  CTRDARCFormatErrorCode as DARCFormatErrorCode
 };

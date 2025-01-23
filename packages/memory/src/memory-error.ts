@@ -1,165 +1,344 @@
 import { CTRError } from "@libctr/error";
-import type { CTRMemory, CTRMemoryDataType } from "#memory";
+import { CTRMemory, CTRMemoryDataType } from "#memory";
 
-type CTRMemoryAction = "read" | "write";
+type CTRMemoryAction = "read" | "seek" | "write";
 type CTRMemoryRange = [bigint, bigint] | [number, number];
 
 type CTRMemoryErrorCode =
-  | typeof CTRMemoryError.ERR_DEALLOCATED
   | typeof CTRMemoryError.ERR_COUNT_FAIL
+  | typeof CTRMemoryError.ERR_DEALLOCATED
   | typeof CTRMemoryError.ERR_OUT_OF_RANGE
+  | typeof CTRMemoryError.ERR_UNKNOWN_TYPE
   | typeof CTRMemoryError.ERR_OUT_OF_MEMORY
   | typeof CTRMemoryError.ERR_OUT_OF_BOUNDS
   | typeof CTRMemoryError.ERR_INVALID_ARGUMENT
-  | typeof CTRMemoryError.ERR_UNSUPPORTED_ENCODING;
+  | typeof CTRMemoryError.ERR_UNKNOWN_ENCODING
+  | typeof CTRMemoryError.ERR_UNKNOWN_BOM_MARK
+  | typeof CTRMemoryError.ERR_INVALID_OPERATION
+  | typeof CTRMemoryError.ERR_UNKNOWN_ENDIANNESS;
 
-interface CTRMemoryErrorMetadata {
-  count?: number;
-  actual?: number;
-  offset?: number;
-  encoding?: string;
-  buffer?: CTRMemory;
-  range?: CTRMemoryRange;
-  value?: bigint | number;
-  action?: CTRMemoryAction;
-  datatype?: CTRMemoryDataType;
-}
-
-class CTRMemoryError<
-  C extends CTRMemoryErrorCode = CTRMemoryErrorCode,
-  M extends CTRMemoryErrorMetadata = CTRMemoryErrorMetadata
-> extends CTRError<C, M> {
-  public static is<C extends CTRMemoryErrorCode>(
-    value: unknown,
-    code?: C
-  ): value is CTRMemoryError<C> {
-    return (
-      value instanceof CTRMemoryError &&
-      (code === undefined || value.code === code)
-    );
-  }
-
+class CTRMemoryError extends CTRError {
   public static readonly ERR_COUNT_FAIL = "memory.err_count_fail";
   public static readonly ERR_DEALLOCATED = "memory.err_deallocated";
   public static readonly ERR_OUT_OF_RANGE = "memory.err_out_of_range";
+  public static readonly ERR_UNKNOWN_TYPE = "memory.err_unknown_type";
   public static readonly ERR_OUT_OF_MEMORY = "memory.err_out_of_memory";
   public static readonly ERR_OUT_OF_BOUNDS = "memory.err_out_of_bounds";
-
-  public static readonly ERR_UNSUPPORTED_ENCODING =
-    "memory.err_unsupported_encoding";
-
   public static readonly ERR_INVALID_ARGUMENT = "memory.err_invalid_argument";
+  public static readonly ERR_UNKNOWN_ENCODING = "memory.err_unknown_encoding";
+  public static readonly ERR_UNKNOWN_BOM_MARK = "memory.err_unknown_bom_mark";
+  public static readonly ERR_INVALID_OPERATION = "memory.err_invalid_operation";
 
-  public constructor(code: C, metadata: M, message?: string, cause?: unknown) {
-    super(code, metadata, message, cause);
-  }
-}
+  public static readonly ERR_UNKNOWN_ENDIANNESS =
+    "memory.err_unknown_endianness";
 
-class CTRMemoryUsedError extends CTRMemoryError<
-  typeof CTRMemoryError.ERR_DEALLOCATED,
-  {}
-> {
-  public constructor(message?: string, cause?: unknown) {
-    super(CTRMemoryError.ERR_DEALLOCATED, {}, message, cause);
-  }
-}
+  public readonly buffer: CTRMemory;
 
-interface CTRMemoryUnsupportedEncodingErrorMetadata
-  extends Required<Pick<CTRMemoryErrorMetadata, "encoding">>,
-    Pick<CTRMemoryErrorMetadata, "buffer"> {}
-
-class CTRMemoryUnsupportedEncodingError extends CTRMemoryError<
-  typeof CTRMemoryError.ERR_UNSUPPORTED_ENCODING,
-  CTRMemoryUnsupportedEncodingErrorMetadata
-> {
   public constructor(
-    metadata: CTRMemoryUnsupportedEncodingErrorMetadata,
+    buffer: CTRMemory,
+    code: null | CTRMemoryErrorCode,
+    message?: string,
+    cause?: unknown
+  ) {
+    super(code, message, cause);
+    this.buffer = buffer;
+  }
+}
+
+class CTRMemoryUsedError extends CTRMemoryError {
+  public override readonly code: typeof CTRMemoryError.ERR_DEALLOCATED;
+
+  public constructor(buffer: CTRMemory, message?: string, cause?: unknown) {
+    super(buffer, null, message, cause);
+    this.code = CTRMemoryError.ERR_DEALLOCATED;
+  }
+}
+
+class CTRMemoryInvalidOperationError extends CTRMemoryError {
+  public readonly action: CTRMemoryAction;
+  public readonly type: null | CTRMemoryDataType;
+  public readonly value: null | string | bigint | number;
+  public override readonly code: typeof CTRMemoryError.ERR_UNKNOWN_BOM_MARK;
+
+  public constructor(
+    buffer: CTRMemory,
+    value: null | string | bigint | number,
+    action: CTRMemoryAction,
+    type: null | CTRMemoryDataType,
+    message: string,
+    cause?: unknown
+  ) {
+    super(buffer, null, message, cause);
+
+    this.type = type;
+    this.value = value;
+    this.action = action;
+    this.code = CTRMemoryError.ERR_UNKNOWN_BOM_MARK;
+  }
+}
+
+class CTRMemoryUnknownBOMMarkError extends CTRMemoryError {
+  private static _makeMessage(bom: number, message?: string): string {
+    if (message !== undefined) {
+      return message;
+    }
+
+    return `unknown BOM mark 0x${bom.toString(16)}`;
+  }
+
+  public readonly bom: number;
+  public override readonly code: typeof CTRMemoryError.ERR_UNKNOWN_BOM_MARK;
+
+  public constructor(
+    buffer: CTRMemory,
+    bom: number,
     message?: string,
     cause?: unknown
   ) {
     super(
-      CTRMemoryError.ERR_UNSUPPORTED_ENCODING,
-      metadata,
-      message || `unknown encoding '${metadata.encoding}'`,
+      buffer,
+      null,
+      CTRMemoryUnknownBOMMarkError._makeMessage(bom, message),
       cause
     );
+
+    this.bom = bom;
+    this.code = CTRMemoryError.ERR_UNKNOWN_BOM_MARK;
   }
 }
 
-interface CTRMemoryCountFailErrorMetadata
-  extends Required<
-    Pick<CTRMemoryErrorMetadata, "count" | "action" | "actual" | "buffer">
-  > {}
+class CTRMemoryUnknownTypeError extends CTRMemoryError {
+  private static _makeMessage(type: string, message?: string): string {
+    if (message !== undefined) {
+      return message;
+    }
 
-class CTRMemoryCountFailError extends CTRMemoryError<
-  typeof CTRMemoryError.ERR_COUNT_FAIL,
-  CTRMemoryCountFailErrorMetadata
-> {
+    return `unknown type '${type}'`;
+  }
+
+  public readonly type: string;
+  public override readonly code: typeof CTRMemoryError.ERR_UNKNOWN_TYPE;
+
   public constructor(
-    metadata: CTRMemoryCountFailErrorMetadata,
+    buffer: CTRMemory,
+    type: string,
     message?: string,
     cause?: unknown
   ) {
     super(
-      CTRMemoryError.ERR_COUNT_FAIL,
-      metadata,
-      message || `failed to ${metadata.action} exactly ${metadata.count} bytes`,
+      buffer,
+      null,
+      CTRMemoryUnknownTypeError._makeMessage(type, message),
       cause
     );
+
+    this.type = type;
+    this.code = CTRMemoryError.ERR_UNKNOWN_TYPE;
   }
 }
 
-interface CTRMemoryOOBErrorMetadata
-  extends Required<
-      Pick<CTRMemoryErrorMetadata, "action" | "buffer" | "offset">
-    >,
-    Pick<CTRMemoryErrorMetadata, "datatype"> {}
+class CTRMemoryUnknownEncodingError extends CTRMemoryError {
+  private static _makeMessage(encoding: string, message?: string): string {
+    if (message !== undefined) {
+      return message;
+    }
 
-class CTRMemoryOOBError extends CTRMemoryError<
-  typeof CTRMemoryError.ERR_OUT_OF_BOUNDS,
-  CTRMemoryOOBErrorMetadata
-> {
+    return `unknown encoding '${encoding}'`;
+  }
+
+  public readonly encoding: string;
+  public override readonly code: typeof CTRMemoryError.ERR_UNKNOWN_ENCODING;
+
   public constructor(
-    metadata: CTRMemoryOOBErrorMetadata,
+    buffer: CTRMemory,
+    encoding: string,
     message?: string,
     cause?: unknown
   ) {
     super(
-      CTRMemoryError.ERR_OUT_OF_BOUNDS,
-      metadata,
-      message || metadata.datatype !== undefined
-        ? `out of bounds ${metadata.action} of a ${metadata.datatype} at offset ${metadata.offset}`
-        : `offset ${metadata.offset} is out of bounds`,
+      buffer,
+      null,
+      CTRMemoryUnknownEncodingError._makeMessage(encoding, message),
       cause
     );
+
+    this.encoding = encoding;
+    this.code = CTRMemoryError.ERR_UNKNOWN_ENCODING;
   }
 }
 
-interface CTRMemoryOutOfRangeErrorMetadata
-  extends Required<Pick<CTRMemoryErrorMetadata, "range" | "value" | "buffer">>,
-    Pick<CTRMemoryErrorMetadata, "datatype"> {}
+class CTRMemoryUnknownEndiannessError extends CTRMemoryError {
+  private static _makeMessage(endianness: string, message?: string): string {
+    if (message !== undefined) {
+      return message;
+    }
 
-class CTRMemoryOutOfRangeError extends CTRMemoryError<
-  typeof CTRMemoryError.ERR_OUT_OF_RANGE,
-  CTRMemoryOutOfRangeErrorMetadata
-> {
+    return `unknown endianness '${endianness}'`;
+  }
+
+  public readonly endianness: string;
+  public override readonly code: typeof CTRMemoryError.ERR_UNKNOWN_ENDIANNESS;
+
   public constructor(
-    metadata: CTRMemoryOutOfRangeErrorMetadata,
+    buffer: CTRMemory,
+    endianness: string,
     message?: string,
     cause?: unknown
   ) {
     super(
+      buffer,
+      null,
+      CTRMemoryUnknownEndiannessError._makeMessage(endianness, message),
+      cause
+    );
+
+    this.endianness = endianness;
+    this.code = CTRMemoryError.ERR_UNKNOWN_ENDIANNESS;
+  }
+}
+
+class CTRMemoryCountFailError extends CTRMemoryError {
+  private static _makeMessage(
+    count: number,
+    action: CTRMemoryAction,
+    message?: string
+  ): string {
+    if (message !== undefined) {
+      return message;
+    }
+
+    return `failed to ${action} exactly ${count} bytes`;
+  }
+
+  public readonly count: number;
+  public readonly actual: number;
+  public readonly action: CTRMemoryAction;
+  public override readonly code: typeof CTRMemoryError.ERR_COUNT_FAIL;
+
+  public constructor(
+    buffer: CTRMemory,
+    count: number,
+    actual: number,
+    action: CTRMemoryAction,
+    message?: string,
+    cause?: unknown
+  ) {
+    super(
+      buffer,
+      null,
+      CTRMemoryCountFailError._makeMessage(count, action, message),
+      cause
+    );
+
+    this.count = count;
+    this.action = action;
+    this.actual = actual;
+    this.code = CTRMemoryError.ERR_COUNT_FAIL;
+  }
+}
+
+class CTRMemoryOOBError extends CTRMemoryError {
+  private static _makeMessage(
+    offset: number,
+    type: null | CTRMemoryDataType,
+    action: CTRMemoryAction,
+    message?: string
+  ): string {
+    if (message !== undefined) {
+      return message;
+    }
+
+    return type !== null
+      ? `out of bounds ${action} of a ${type} at offset ${offset}`
+      : `offset ${offset} is out of bounds`;
+  }
+
+  public readonly offset: number;
+  public readonly action: CTRMemoryAction;
+  public readonly type: null | CTRMemoryDataType;
+  public override readonly code: typeof CTRMemoryError.ERR_OUT_OF_BOUNDS;
+
+  public constructor(
+    buffer: CTRMemory,
+    offset: number,
+    type: null | CTRMemoryDataType,
+    action: CTRMemoryAction,
+    message?: string,
+    cause?: unknown
+  ) {
+    super(
+      buffer,
+      null,
+      CTRMemoryOOBError._makeMessage(offset, type, action, message),
+      cause
+    );
+
+    this.type = type;
+    this.action = action;
+    this.offset = offset;
+    this.code = CTRMemoryError.ERR_OUT_OF_BOUNDS;
+  }
+}
+
+class CTRMemoryOutOfRangeError extends CTRMemoryError {
+  private static _makeMessage(
+    this: void,
+    value: bigint | number,
+    type: null | CTRMemoryDataType,
+    range: null | CTRMemoryRange,
+    message?: string
+  ): string {
+    if (message !== undefined) {
+      return message;
+    }
+
+    message = `${value} is out of the allowed range`;
+
+    if (type !== null) {
+      message += ` for ${type}`;
+    }
+
+    if (range !== null) {
+      message += ` ([${range[0]}; ${range[1]}])`;
+    }
+
+    return message;
+  }
+
+  public readonly value: bigint | number;
+  public readonly range: null | CTRMemoryRange;
+  public readonly type: null | CTRMemoryDataType;
+  public override readonly code: typeof CTRMemoryError.ERR_OUT_OF_RANGE;
+
+  public constructor(
+    buffer: CTRMemory,
+    value: bigint | number,
+    type: null | CTRMemoryDataType,
+    range: null | CTRMemoryRange,
+    message?: string,
+    cause?: unknown
+  ) {
+    super(
+      buffer,
       CTRMemoryError.ERR_OUT_OF_RANGE,
-      metadata,
-      message || metadata.datatype !== undefined
-        ? `${metadata.value} is out of the allowed range for ${metadata.datatype} ([${metadata.range[0]}; ${metadata.range[1]}])`
-        : `${metadata.value} is out of the allowed range ([${metadata.range[0]}; ${metadata.range[1]}])`,
+      CTRMemoryOutOfRangeError._makeMessage(value, type, range, message),
       cause
     );
+
+    this.type = type;
+    this.range = range;
+    this.value = value;
+    this.code = CTRMemoryError.ERR_OUT_OF_RANGE;
   }
 }
 
 export {
+  CTRMemoryInvalidOperationError,
+  CTRMemoryInvalidOperationError as MemoryInvalidOperationError,
+  CTRMemoryUnknownBOMMarkError,
+  CTRMemoryUnknownBOMMarkError as MemoryUnknownBOMMarkError,
+  CTRMemoryUnknownTypeError,
+  CTRMemoryUnknownTypeError as MemoryUnknownTypeError,
   CTRMemoryError,
   CTRMemoryError as MemoryError,
   CTRMemoryOOBError,
@@ -170,8 +349,10 @@ export {
   CTRMemoryOutOfRangeError as MemoryOutOfRangeError,
   CTRMemoryCountFailError,
   CTRMemoryCountFailError as MemoryCountFailError,
-  CTRMemoryUnsupportedEncodingError,
-  CTRMemoryUnsupportedEncodingError as MemoryUnsupportedEncodingError
+  CTRMemoryUnknownEncodingError,
+  CTRMemoryUnknownEncodingError as MemoryUnknownEncodingError,
+  CTRMemoryUnknownEndiannessError,
+  CTRMemoryUnknownEndiannessError as MemoryUnknownEndiannessError
 };
 
 export type {
@@ -180,15 +361,5 @@ export type {
   CTRMemoryAction,
   CTRMemoryAction as MemoryAction,
   CTRMemoryErrorCode,
-  CTRMemoryErrorCode as MemoryErrorCode,
-  CTRMemoryErrorMetadata,
-  CTRMemoryErrorMetadata as MemoryErrorMetadata,
-  CTRMemoryOOBErrorMetadata,
-  CTRMemoryOOBErrorMetadata as MemoryOOBErrorMetadata,
-  CTRMemoryOutOfRangeErrorMetadata,
-  CTRMemoryOutOfRangeErrorMetadata as MemoryOutOfRangeErrorMetadata,
-  CTRMemoryCountFailErrorMetadata,
-  CTRMemoryCountFailErrorMetadata as MemoryCountFailErrorMetadata,
-  CTRMemoryUnsupportedEncodingErrorMetadata,
-  CTRMemoryUnsupportedEncodingErrorMetadata as MemoryUnsupportedEncodingErrorMetadata
+  CTRMemoryErrorCode as MemoryErrorCode
 };

@@ -14,9 +14,4 @@ export type {
 } from "#vfs/vfs";
 
 export { CTRVFSError as Error } from "#vfs/vfs-error";
-
-export type {
-  CTRVFSErrorCode as ErrorCode,
-  CTRVFSErrorMetadata as ErrorMetadata,
-  CTRVFSAlreadyExistsErrorMetadata as AlreadyExistsErrorMetadata
-} from "#vfs/vfs-error";
+export type { CTRVFSErrorCode as ErrorCode } from "#vfs/vfs-error";

@@ -1,27 +1,20 @@
-type CTRErrorCode = "ctr.unknown" | "ctr.not_implemented" | (string & {});
-
-class CTRError<
-  C extends CTRErrorCode = CTRErrorCode,
-  M = unknown
-> extends Error {
-  public readonly code: C;
+class CTRError extends Error {
   public readonly cause: unknown;
-  public readonly metadata: Readonly<M>;
+  public readonly code: null | string;
 
-  public constructor(code: C, metadata: M, message?: string, cause?: unknown) {
+  public constructor(code: null | string, message?: string, cause?: unknown) {
     super(
       message !== undefined
         ? message
         : cause instanceof Error
           ? cause.message
-          : code
+          : undefined
     );
 
     this.code = code;
     this.cause = cause;
-    this.metadata = metadata;
+    this.name = this.constructor.name;
   }
 }
 
 export { CTRError, CTRError as Error };
-export type { CTRErrorCode, CTRErrorCode as ErrorCode };

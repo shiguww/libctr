@@ -1,6 +1,7 @@
 {
   "devDependencies": {
     "tsup": "catalog:",
+    "vitest": "catalog:",
     "typescript": "catalog:",
     "@types/pngjs": "^6.0.5",
     "@libctr/tsconfig": "workspace:^"
@@ -34,5 +35,5 @@
   },
   "type": "module",
   "types": "dist/index.d.ts",
-  "version": "0.1.2"
+  "version": "1.0.0"
 }

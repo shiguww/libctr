@@ -1,64 +1,27 @@
 import { CTRError } from "@libctr/error";
-import type { CTRVFSNode } from "#vfs/vfs";
+import type { CTRVFSDirectory, CTRVFSNode } from "#vfs/vfs";
 
 type CTRVFSErrorCode = typeof CTRVFSError.ERR_ALREADY_EXISTS;
 
-interface CTRVFSErrorMetadata {
-  child?: CTRVFSNode;
-  parent?: CTRVFSNode;
-}
-
-class CTRVFSError<
-  C extends CTRVFSErrorCode = CTRVFSErrorCode,
-  M extends CTRVFSErrorMetadata = CTRVFSErrorMetadata
-> extends CTRError<C, M> {
-  public static is<C extends CTRVFSErrorCode>(
-    value: unknown,
-    code?: C
-  ): value is CTRVFSError<C> {
-    return (
-      value instanceof CTRVFSError &&
-      (code === undefined || value.code === code)
-    );
-  }
-
+class CTRVFSError extends CTRError {
   public static readonly ERR_ALREADY_EXISTS = "vfs.err_already_exists";
-}
 
-interface CTRVFSAlreadyExistsErrorMetadata
-  extends Required<CTRVFSErrorMetadata> {}
+  public readonly node: CTRVFSNode;
+  public readonly target: CTRVFSDirectory;
 
-class CTRVFSAlreadyExistsError extends CTRVFSError<
-  typeof CTRVFSError.ERR_ALREADY_EXISTS,
-  CTRVFSAlreadyExistsErrorMetadata
-> {
   public constructor(
-    metadata: CTRVFSAlreadyExistsErrorMetadata,
+    code: null | CTRVFSErrorCode,
+    node: CTRVFSNode,
+    target: CTRVFSDirectory,
     message?: string,
     cause?: unknown
   ) {
-    super(
-      CTRVFSError.ERR_ALREADY_EXISTS,
-      metadata,
-      message ||
-        `'${metadata.child.name}' already exists${metadata.parent.path && ` in '${metadata.parent.path}'`}`,
-      cause
-    );
+    super(code, message, cause);
+
+    this.node = node;
+    this.target = target;
   }
 }
 
-export {
-  CTRVFSError,
-  CTRVFSError as VFSError,
-  CTRVFSAlreadyExistsError,
-  CTRVFSAlreadyExistsError as VFSAlreadyExistsError
-};
-
-export type {
-  CTRVFSErrorCode,
-  CTRVFSErrorCode as VFSErrorCode,
-  CTRVFSErrorMetadata,
-  CTRVFSErrorMetadata as VFSErrorMetadata,
-  CTRVFSAlreadyExistsErrorMetadata,
-  CTRVFSAlreadyExistsErrorMetadata as VFSAlreadyExistsErrorMetadata
-};
+export { CTRVFSError, CTRVFSError as VFSError };
+export type { CTRVFSErrorCode, CTRVFSErrorCode as VFSErrorCode };

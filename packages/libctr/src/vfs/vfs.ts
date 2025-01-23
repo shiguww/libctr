@@ -1,8 +1,8 @@
 import fs from "node:fs/promises";
 import { CTRMemory } from "@libctr/memory";
+import { CTRVFSError } from "#vfs/vfs-error";
 import type { CTRMemoryArray } from "@libctr/memory";
 import type { Mode, MakeDirectoryOptions } from "node:fs";
-import { CTRVFSAlreadyExistsError } from "#vfs/vfs-error";
 import { CTREventEmitter } from "#event-emitter/event-emitter";
 import { join, dirname, extname, resolve, basename } from "node:path";
 import type { CTREventEmitterDefaultEventMap } from "#event-emitter/event-emitter";
@@ -38,11 +38,7 @@ abstract class BaseCTRVFSNode<D extends object, F extends object> {
   }
 
   public get path(): string {
-    if (this.parent === null) {
-      return this.name;
-    }
-
-    return join(this.parent.path, this.name);
+    return this.segments.join("/");
   }
 
   public get kind(): this extends CTRVFSFile<D, F> ? "file" : "directory" {
@@ -60,7 +56,9 @@ abstract class BaseCTRVFSNode<D extends object, F extends object> {
   }
 
   public get segments(): string[] {
-    return this.path.split(/[\/|\\]/);
+    return this.parent === null
+      ? [this.name]
+      : [...this.parent.segments, this.name];
   }
 
   public get extname(): string {
@@ -72,7 +70,7 @@ abstract class BaseCTRVFSNode<D extends object, F extends object> {
   }
 
   public get basename(): string {
-    return basename(this.name);
+    return basename(this.path);
   }
 
   public get protocol(): null | string {
@@ -618,10 +616,7 @@ class CTRVFSDirectory<
     const mode = options?.mode || (options?.merge ? "merge" : "fail");
 
     if (mode === "fail" && this.exists(node)) {
-      throw new CTRVFSAlreadyExistsError({
-        child: node,
-        parent: this
-      });
+      throw new CTRVFSError(CTRVFSError.ERR_ALREADY_EXISTS, node, this);
     }
 
     if (mode === "skip") {
@@ -692,10 +687,7 @@ class CTRVFSDirectory<
     }
 
     if (merge === "fail") {
-      throw new CTRVFSAlreadyExistsError({
-        child: node,
-        parent: this
-      });
+      throw new CTRVFSError(CTRVFSError.ERR_ALREADY_EXISTS, node, this);
     }
 
     if (merge === "skip") {

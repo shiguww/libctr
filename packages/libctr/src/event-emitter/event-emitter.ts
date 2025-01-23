@@ -64,7 +64,7 @@ class CTREventEmitter<
           "error",
           err instanceof CTRError
             ? err
-            : new CTRError("ctr.unknown", null, undefined, err)
+            : new CTRError("ctr.err_unknown", undefined, err)
         );
       }
     };

@@ -14,13 +14,12 @@ export type {
 
 export {
   CTRDARCError as Error,
+  CTRDARCFormatError as FormatError,
   CTRDARCInvalidStateError as InvalidStateError,
   CTRDARCUnsupportedVersionError as UnsupportedVersionError
 } from "#darc/darc-error";
 
 export type {
   CTRDARCErrorCode as ErrorCode,
-  CTRDARCErrorMetadata as ErrorMetadata,
-  CTRDARCInvalidStateErrorMetadata as InvalidStateErrorMetadata,
-  CTRDARCUnsupportedVersionErrorMetadata as UnsupportedVersionErrorMetadata
+  CTRDARCFormatErrorCode as FormatErrorCode
 } from "#darc/darc-error";

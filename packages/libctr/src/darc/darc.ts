@@ -9,6 +9,7 @@ import type { CTREventEmitterDefaultEventMap } from "#event-emitter/event-emitte
 
 import {
   CTRDARCError,
+  CTRDARCFormatError,
   CTRDARCInvalidStateError,
   CTRDARCUnsupportedVersionError
 } from "#darc/darc-error";
@@ -70,9 +71,9 @@ class CTRDARC extends CTRBinarySerializable<
   private static readonly HEADER_SIZE = 0x1c;
   private static readonly MAGIC = [0x64, 0x61, 0x72, 0x63];
 
-  public endianness: CTRMemoryEndianness;
-  public readonly version: CTRVersion;
   public readonly root: CTRDARCVFS;
+  public readonly version: CTRVersion;
+  public endianness: CTRMemoryEndianness;
 
   public constructor() {
     super();
@@ -199,9 +200,7 @@ class CTRDARC extends CTRBinarySerializable<
     const count = root.length - 1;
 
     if (!root.isDirectory) {
-      throw new CTRDARCError(CTRDARCError.ERR_ROOT_IS_NOT_A_DIRECTORY, {
-        buffer
-      });
+      throw new CTRDARCError(CTRDARCError.ERR_ROOT_IS_NOT_A_DIRECTORY);
     }
 
     const nodes: CTRDARCNode[] = [root];
@@ -214,7 +213,7 @@ class CTRDARC extends CTRBinarySerializable<
 
     for (const node of nodes) {
       if (buffer.offset !== nameOffset + node.nameOffset) {
-        throw new CTRDARCError(CTRDARCError.ERR_MALFORMED_FILE, { buffer });
+        throw new CTRDARCError(CTRDARCError.ERR_MALFORMED_FILE);
       }
 
       node.name = buffer.string({
@@ -233,7 +232,7 @@ class CTRDARC extends CTRBinarySerializable<
     );
 
     if (buffer.offset !== header.tableOffset + header.tableLength) {
-      throw new CTRDARCError(CTRDARCError.ERR_MALFORMED_FILE, { buffer });
+      throw new CTRDARCError(CTRDARCError.ERR_MALFORMED_FILE);
     }
 
     this._parsealign(buffer);
@@ -249,14 +248,14 @@ class CTRDARC extends CTRBinarySerializable<
 
       while (buffer.offset !== node.dataOffset) {
         if (buffer.u8() !== 0x00) {
-          throw new CTRDARCError(CTRDARCError.ERR_MALFORMED_FILE, { buffer });
+          throw new CTRDARCError(CTRDARCError.ERR_MALFORMED_FILE);
         }
 
         node.padding += 1;
       }
 
       if (i === 0 && buffer.offset !== header.dataStartOffset) {
-        throw new CTRDARCError(CTRDARCError.ERR_MALFORMED_FILE, { buffer });
+        throw new CTRDARCError(CTRDARCError.ERR_MALFORMED_FILE);
       }
 
       node.data = buffer.raw({ count: node.length }).steal();
@@ -299,34 +298,33 @@ class CTRDARC extends CTRBinarySerializable<
     return length;
   }
 
-  protected override _builderr(err: unknown, buffer: CTRMemory): CTRDARCError {
-    return new CTRDARCError(
-      CTRDARCError.ERR_UNKNOWN,
-      { buffer },
+  protected override _builderr(
+    err: unknown,
+    buffer: CTRMemory
+  ): CTRDARCFormatError {
+    return new CTRDARCFormatError(
+      CTRDARCError.ERR_BUILD,
+      buffer,
       undefined,
       err
     );
   }
 
-  protected override _parseerr(err: unknown, buffer: CTRMemory): CTRDARCError {
-    if (err instanceof CTRDARCError) {
-      return err;
-    }
-
-    if (err instanceof CTRMemoryOOBError) {
-      return new CTRDARCError(
-        CTRDARCError.ERR_UNEXPECTED_END_OF_FILE,
-        { buffer },
-        undefined,
-        err
-      );
-    }
-
-    return new CTRDARCError(
-      CTRDARCError.ERR_UNKNOWN,
-      { buffer },
+  protected override _parseerr(
+    err: unknown,
+    buffer: CTRMemory
+  ): CTRDARCFormatError {
+    return new CTRDARCFormatError(
+      CTRDARCError.ERR_PARSE,
+      buffer,
       undefined,
-      err
+      err instanceof CTRMemoryOOBError
+        ? new CTRDARCError(
+            CTRDARCError.ERR_UNEXPECTED_END_OF_FILE,
+            undefined,
+            err
+          )
+        : err
     );
   }
 
@@ -343,14 +341,14 @@ class CTRDARC extends CTRBinarySerializable<
           typeof node.attributes !== "object" ||
           typeof node.attributes.padding !== "number"
         ) {
-          return new CTRDARCInvalidStateError({ state });
+          return new CTRDARCInvalidStateError(state);
         }
       }
 
       return null;
     }
 
-    return new CTRDARCInvalidStateError({ state });
+    return new CTRDARCInvalidStateError(state);
   }
 
   private _buildNode(node: CTRDARCNode, buffer: CTRMemory): void {
@@ -389,7 +387,7 @@ class CTRDARC extends CTRBinarySerializable<
       buffer.offset !== CTRMemory.align(buffer.offset, CTRDARC.ALIGNMENT)
     ) {
       if (buffer.u8() !== 0x00) {
-        throw new CTRDARCError(CTRDARCError.ERR_MALFORMED_FILE, { buffer });
+        throw new CTRDARCError(CTRDARCError.ERR_MALFORMED_FILE);
       }
     }
   }
@@ -446,7 +444,7 @@ class CTRDARC extends CTRBinarySerializable<
     const magic = buffer.raw({ count: CTRDARC.MAGIC.length });
 
     if (!magic.equals(CTRDARC.MAGIC)) {
-      throw new CTRDARCError(CTRDARCError.ERR_NOT_A_DARC_FILE, { buffer });
+      throw new CTRDARCError(CTRDARCError.ERR_NOT_A_DARC_FILE);
     }
 
     const endianness = buffer.bom("u16");
@@ -460,15 +458,15 @@ class CTRDARC extends CTRBinarySerializable<
     const dataStartOffset = buffer.u32();
 
     if (!version.is(CTRDARC.VERSION_SPECIFIER)) {
-      throw new CTRDARCUnsupportedVersionError({ buffer, version });
+      throw new CTRDARCUnsupportedVersionError(version);
     }
 
     if (size !== CTRDARC.HEADER_SIZE || fileLength !== buffer.length) {
-      throw new CTRDARCError(CTRDARCError.ERR_INVALID_HEADER, { buffer });
+      throw new CTRDARCError(CTRDARCError.ERR_INVALID_HEADER);
     }
 
     if (tableOffset !== CTRDARC.HEADER_SIZE) {
-      throw new CTRDARCError(CTRDARCError.ERR_MALFORMED_FILE, { buffer });
+      throw new CTRDARCError(CTRDARCError.ERR_MALFORMED_FILE);
     }
 
     this.version.set(version.toString());

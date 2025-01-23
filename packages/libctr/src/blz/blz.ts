@@ -1,6 +1,6 @@
-import { CTRBLZError } from "#blz/blz-error";
 import type { CTRMemoryArray } from "@libctr/memory";
 import { CTRMemory, CTRMemoryOOBError } from "@libctr/memory";
+import { CTRBLZError, CTRBLZFormatError } from "#blz/blz-error";
 
 const BLZ_SHIFT = 1;
 const BLZ_MASK = 0x80;
@@ -19,16 +19,7 @@ function decode(_buffer: CTRMemoryArray): CTRMemory {
   try {
     return _decode(buffer);
   } catch (err) {
-    if (err instanceof CTRMemoryOOBError) {
-      throw new CTRBLZError(
-        CTRBLZError.ERR_UNEXPECTED_END_OF_FILE,
-        { buffer },
-        undefined,
-        err
-      );
-    }
-
-    throw new CTRBLZError(CTRBLZError.ERR_UNKNOWN, { buffer }, undefined, err);
+    throw _decodeerr(buffer, err);
   }
 }
 
@@ -39,38 +30,29 @@ function encode(_buffer: CTRMemoryArray): CTRMemory {
   try {
     return _encode(buffer);
   } catch (err) {
-    if (err instanceof CTRMemoryOOBError) {
-      throw new CTRBLZError(
-        CTRBLZError.ERR_UNEXPECTED_END_OF_FILE,
-        { buffer },
-        undefined,
-        err
-      );
-    }
-
-    throw new CTRBLZError(CTRBLZError.ERR_UNKNOWN, { buffer }, undefined, err);
+    throw _encodeerr(buffer, err);
   }
 }
 
 function _decode(buffer: CTRMemory): CTRMemory {
   if (buffer.length < BLZ_MIN) {
-    throw new CTRBLZError(CTRBLZError.ERR_BUFFER_TOO_SMALL, { buffer });
+    throw new CTRBLZError(CTRBLZError.ERR_BUFFER_TOO_SMALL);
   }
 
   if (buffer.length > BLZ_MAX) {
-    throw new CTRBLZError(CTRBLZError.ERR_BUFFER_TOO_LARGE, { buffer });
+    throw new CTRBLZError(CTRBLZError.ERR_BUFFER_TOO_LARGE);
   }
 
   const inc = buffer.at(-4, "u32");
 
   if (inc === 0) {
-    throw new CTRBLZError(CTRBLZError.ERR_NOT_A_BLZ_FILE, { buffer });
+    throw new CTRBLZError(CTRBLZError.ERR_NOT_A_BLZ_FILE);
   }
 
   const hdr = buffer.at(-5, "u8");
 
   if (hdr < BLZ_HDR_MIN || hdr > BLZ_HDR_MAX) {
-    throw new CTRBLZError(CTRBLZError.ERR_INVALID_HEADER, { buffer });
+    throw new CTRBLZError(CTRBLZError.ERR_INVALID_HEADER);
   }
 
   const enc = buffer.at(-8, "u24");
@@ -79,7 +61,7 @@ function _decode(buffer: CTRMemory): CTRMemory {
   const pak = buffer.subarray(0, dec + enc - hdr);
 
   if (raw.length > BLZ_RAW_MAX) {
-    throw new CTRBLZError(CTRBLZError.ERR_INVALID_HEADER, { buffer });
+    throw new CTRBLZError(CTRBLZError.ERR_INVALID_HEADER);
   }
 
   for (let i = 0; i < dec; i += 1) {
@@ -106,7 +88,7 @@ function _decode(buffer: CTRMemory): CTRMemory {
       const len = (pos >> 12) + BLZ_THRESHOLD + 1;
 
       if (raw.offset + len > raw.length) {
-        throw new CTRBLZError(CTRBLZError.ERR_MALFORMED_FILE, { buffer });
+        throw new CTRBLZError(CTRBLZError.ERR_MALFORMED_FILE);
       }
 
       pos = (pos & 0xfff) + 3;
@@ -125,7 +107,7 @@ function _decode(buffer: CTRMemory): CTRMemory {
 
 function _encode(raw: CTRMemory): CTRMemory {
   if (raw.length > BLZ_RAW_MAX) {
-    throw new CTRBLZError(CTRBLZError.ERR_BUFFER_TOO_LARGE, { buffer: raw });
+    throw new CTRBLZError(CTRBLZError.ERR_BUFFER_TOO_LARGE);
   }
 
   let paktmp = 0;
@@ -262,6 +244,21 @@ function _search(raw: CTRMemory): [number, number] {
   }
 
   return [lenbest, posbest];
+}
+
+function _decodeerr(buffer: CTRMemory, err: unknown): CTRBLZError {
+  return new CTRBLZFormatError(
+    CTRBLZError.ERR_DECODE,
+    buffer,
+    undefined,
+    err instanceof CTRMemoryOOBError
+      ? new CTRBLZError(CTRBLZError.ERR_UNEXPECTED_END_OF_FILE, undefined, err)
+      : err
+  );
+}
+
+function _encodeerr(buffer: CTRMemory, err: unknown): CTRBLZError {
+  return new CTRBLZFormatError(CTRBLZError.ERR_ENCODE, buffer, undefined, err);
 }
 
 export { decode, encode };

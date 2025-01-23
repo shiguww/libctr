@@ -13,6 +13,9 @@ abstract class CTRBinarySerializable<
   E extends CTREventEmitterEventMap = CTREventEmitterDefaultEventMap,
   BC = undefined,
   PC = BC,
+  BE extends Error = CTRError,
+  PE extends Error = CTRError,
+  SE extends Error = CTRError,
   BO = null,
   PO = BO
 > extends CTREventEmitter<E> {
@@ -24,6 +27,51 @@ abstract class CTRBinarySerializable<
 
   public get sizeof(): number {
     return this._sizeof();
+  }
+
+  protected abstract _build(buffer: CTRMemory, ctx: BC, options?: BO): void;
+  protected abstract _parse(buffer: CTRMemory, ctx: PC, options?: PO): void;
+
+  protected _get(): S {
+    throw new CTRError("ctr.err_not_implemented");
+  }
+
+  protected _set(_state: S): void {
+    throw new CTRError("ctr.err_not_implemented");
+  }
+
+  protected _sizeof(): number {
+    throw new CTRError("ctr.err_not_implemented");
+  }
+
+  protected _validate(_state: unknown): null | SE {
+    return <any>new CTRError("ctr.err_not_implemented");
+  }
+
+  protected _builderr(
+    err: unknown,
+    _buffer: CTRMemory,
+    _ctx: BC,
+    _options?: BO
+  ): BE {
+    return <any>(
+      (err instanceof CTRError
+        ? err
+        : new CTRError("ctr.err_unknown", undefined, err))
+    );
+  }
+
+  protected _parseerr(
+    err: unknown,
+    _buffer: CTRMemory,
+    _ctx: PC,
+    _options?: PO
+  ): PE {
+    return <any>(
+      (err instanceof CTRError
+        ? err
+        : new CTRError("ctr.err_unknown", undefined, err))
+    );
   }
 
   public get(): S {
@@ -38,66 +86,41 @@ abstract class CTRBinarySerializable<
   }
 
   public set(state: S): this {
-    const err = this._validate(state);
-
-    if (err !== null) {
-      throw err;
-    }
-
+    this.validate(state);
     this._set(state);
+
     return this;
   }
 
-  public validate<T>(state: T): null | Error {
-    return this._validate(state);
-  }
-
-  protected abstract _build(buffer: CTRMemory, ctx: BC, options?: BO): void;
-  protected abstract _parse(buffer: CTRMemory, ctx: PC, options?: PO): void;
-
-  protected _get(): S {
-    throw new CTRError("ctr.not_implemented", null);
-  }
-
-  protected _set(state: S): void {
-    throw new CTRError("ctr.not_implemented", { state });
-  }
-
-  protected _sizeof(): number {
-    throw new CTRError("ctr.not_implemented", null);
-  }
-
-  protected _builderr(
-    err: unknown,
-    buffer: CTRMemory,
-    ctx: BC,
-    options?: BO
-  ): Error {
-    if (err instanceof Error) {
-      return err;
-    }
-
-    return new CTRError("ctr.unknown", { ctx, buffer, options });
-  }
-
-  protected _parseerr(
-    err: unknown,
-    buffer: CTRMemory,
-    ctx: PC,
-    options?: PO
-  ): Error {
-    if (err instanceof Error) {
-      return err;
-    }
-
-    return new CTRError("ctr.unknown", { ctx, buffer, options });
-  }
-
-  protected _validate<T>(state: T): null | Error {
-    return new CTRError("ctr.not_implemented", { state });
-  }
-
   public build(buffer?: CTRMemory, ctx?: BC, options?: BO): CTRMemory {
+    const result = this.safebuild(buffer, ctx, options);
+
+    if (result instanceof Error) {
+      throw result;
+    }
+
+    return result;
+  }
+
+  public parse(buffer: CTRMemoryArray, ctx?: PC, options?: PO): this {
+    const result = this.safeparse(buffer, ctx, options);
+
+    if (result instanceof Error) {
+      throw result;
+    }
+
+    return result;
+  }
+
+  public validate(state: unknown): asserts state is S {
+    const err = this._validate(state);
+
+    if (err instanceof Error) {
+      throw err;
+    }
+  }
+
+  public safebuild(buffer?: CTRMemory, ctx?: BC, options?: BO): BE | CTRMemory {
     if (buffer === undefined) {
       buffer = new CTRMemory();
     }
@@ -108,11 +131,11 @@ abstract class CTRBinarySerializable<
 
       return buffer;
     } catch (err) {
-      throw this._builderr(err, buffer, ctx!, options);
+      return this._builderr(err, buffer, ctx!, options);
     }
   }
 
-  public parse(buffer: CTRMemoryArray, ctx?: PC, options?: PO): this {
+  public safeparse(buffer: CTRMemoryArray, ctx?: PC, options?: PO): PE | this {
     buffer = buffer instanceof CTRMemory ? buffer : new CTRMemory(buffer);
 
     try {
@@ -121,8 +144,12 @@ abstract class CTRBinarySerializable<
 
       return this;
     } catch (err) {
-      throw this._parseerr(err, buffer, ctx!, options);
+      return this._parseerr(err, buffer, ctx!, options);
     }
+  }
+
+  public safevalidate(state: unknown): SE | null {
+    return this._validate(state);
   }
 }
 
