@@ -5,6 +5,7 @@ type CTRMemoryAction = "read" | "seek" | "write";
 type CTRMemoryRange = [bigint, bigint] | [number, number];
 
 type CTRMemoryErrorCode =
+  | typeof CTRMemoryError.ERR_UNKNOWN
   | typeof CTRMemoryError.ERR_COUNT_FAIL
   | typeof CTRMemoryError.ERR_DEALLOCATED
   | typeof CTRMemoryError.ERR_OUT_OF_RANGE
@@ -18,6 +19,7 @@ type CTRMemoryErrorCode =
   | typeof CTRMemoryError.ERR_UNKNOWN_ENDIANNESS;
 
 class CTRMemoryError extends CTRError {
+  public static readonly ERR_UNKNOWN = "memory.err_unknown";
   public static readonly ERR_COUNT_FAIL = "memory.err_count_fail";
   public static readonly ERR_DEALLOCATED = "memory.err_deallocated";
   public static readonly ERR_OUT_OF_RANGE = "memory.err_out_of_range";
@@ -33,15 +35,18 @@ class CTRMemoryError extends CTRError {
     "memory.err_unknown_endianness";
 
   public readonly buffer: CTRMemory;
+  public override readonly code: CTRMemoryErrorCode;
 
   public constructor(
     buffer: CTRMemory,
-    code: null | CTRMemoryErrorCode,
+    code?: null | CTRMemoryErrorCode,
     message?: string,
     cause?: unknown
   ) {
-    super(code, message, cause);
+    super(null, message, cause);
+
     this.buffer = buffer;
+    this.code = code || CTRMemoryError.ERR_UNKNOWN;
   }
 }
 
