@@ -59,12 +59,9 @@ class CTREventEmitter<
       try {
         await fn(...params);
       } catch (err) {
-        this.emit(
-          // @ts-expect-error
+        (<CTREventEmitter>this).emit(
           "error",
-          err instanceof CTRError
-            ? err
-            : new CTRError("ctr.err_unknown", undefined, err)
+          err instanceof CTRError ? err : new CTRError(null, undefined, err)
         );
       }
     };

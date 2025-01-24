@@ -32,15 +32,15 @@ class CTRDARCError extends CTRError {
   public static readonly ERR_ROOT_IS_NOT_A_DIRECTORY =
     "darc.err_root_is_not_a_directory";
 
-  public override readonly code: null | CTRDARCErrorCode;
+  public override readonly code: CTRDARCErrorCode;
 
   public constructor(
-    code: null | CTRDARCErrorCode,
+    code?: null | CTRDARCErrorCode,
     message?: string,
     cause?: unknown
   ) {
     super(null, message, cause);
-    this.code = code;
+    this.code = code || CTRDARCError.ERR_UNKNOWN;
   }
 }
 

@@ -2,14 +2,23 @@ import { CTRError } from "@libctr/error";
 
 type CTRROMErrorCode =
   | typeof CTRROMError.ERR_READ
+  | typeof CTRROMError.ERR_UNKNOWN
   | typeof CTRROMError.ERR_UNKNOWN_FORMAT;
 
 class CTRROMError extends CTRError {
   public static readonly ERR_READ = "rom.err_read";
+  public static readonly ERR_UNKNOWN = "rom.err_unknown";
   public static readonly ERR_UNKNOWN_FORMAT = "rom.err_unknown_format";
 
-  public constructor(code: CTRROMErrorCode, message?: string, cause?: unknown) {
-    super(code, message, cause);
+  public override readonly code: CTRROMErrorCode;
+
+  public constructor(
+    code: null | undefined | CTRROMErrorCode,
+    message?: string,
+    cause?: unknown
+  ) {
+    super(null, message, cause);
+    this.code = code || CTRROMError.ERR_UNKNOWN;
   }
 }
 

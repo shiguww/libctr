@@ -28,12 +28,12 @@ class CTRBLZError extends CTRError {
   public override readonly code: CTRBLZErrorCode;
 
   public constructor(
-    code: CTRBLZErrorCode,
+    code?: null | CTRBLZErrorCode,
     message?: string,
     cause?: unknown
   ) {
     super(null, message, cause);
-    this.code = code;
+    this.code = code || CTRBLZError.ERR_UNKNOWN;
   }
 }
 
