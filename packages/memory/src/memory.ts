@@ -1372,7 +1372,7 @@ class CTRMemory {
       case "u48":
         return this.readU48(options);
       case "f64":
-        return this.readI64(options);
+        return this.readF64(options);
       case "i64":
         return this.readI64(options);
       case "u64":
@@ -1518,6 +1518,8 @@ class CTRMemory {
         return this.writeI48(value, options);
       } else if (datatype === "u48") {
         return this.writeU48(value, options);
+      } else if (datatype === "f64") {
+        return this.writeF64(value, options);
       } else if (datatype === "i64") {
         return this.writeI64(value, options);
       } else if (datatype === "u64") {
