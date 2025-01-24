@@ -76,11 +76,7 @@ abstract class CTRBinarySerializable<
 
   public get(): S {
     const state = this._get();
-    const err = this.validate(state);
-
-    if (err !== null) {
-      throw err;
-    }
+    this.validate(state);
 
     return state;
   }
