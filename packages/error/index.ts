@@ -1,8 +1,8 @@
 class CTRError extends Error {
+  public readonly code: string;
   public readonly cause: unknown;
-  public readonly code: null | string;
 
-  public constructor(code: null | string, message?: string, cause?: unknown) {
+  public constructor(code?: null | string, message?: string, cause?: unknown) {
     super(
       message !== undefined
         ? message
@@ -11,9 +11,9 @@ class CTRError extends Error {
           : undefined
     );
 
-    this.code = code;
     this.cause = cause;
     this.name = this.constructor.name;
+    this.code = code || "ctr.err_unknown";
   }
 }
 
