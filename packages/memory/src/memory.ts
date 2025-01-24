@@ -2462,9 +2462,13 @@ class CTRMemory {
       read = (
         endianness === "BE" ? this.buffer.readFloatBE : this.buffer.readFloatLE
       ).bind(this.buffer)(this._offset);
-    } else {
+    } else if (type.startsWith("i")) {
       read = (
         endianness === "BE" ? this.buffer.readIntBE : this.buffer.readIntLE
+      ).bind(this.buffer)(this._offset, sizeof);
+    } else {
+      read = (
+        endianness === "BE" ? this.buffer.readUIntBE : this.buffer.readUIntLE
       ).bind(this.buffer)(this._offset, sizeof);
     }
 
@@ -2558,10 +2562,14 @@ class CTRMemory {
       endianness === "BE"
         ? this._memory.writeDoubleBE(<number>value, this._offset)
         : this._memory.writeDoubleLE(<number>value, this._offset);
-    } else {
+    } else if (type.startsWith("i")) {
       endianness === "BE"
         ? this._memory.writeIntBE(<number>value, this._offset, sizeof)
         : this._memory.writeIntLE(<number>value, this._offset, sizeof);
+    } else {
+      endianness === "BE"
+        ? this._memory.writeUIntBE(<number>value, this._offset, sizeof)
+        : this._memory.writeUIntLE(<number>value, this._offset, sizeof);
     }
 
     this._lastwritten = sizeof;
