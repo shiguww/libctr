@@ -1,7 +1,10 @@
 import fs from "node:fs/promises";
 import { CTRMemory } from "@libctr/memory";
-import { CTRVFSError } from "#vfs/vfs-error";
 import type { CTRMemoryArray } from "@libctr/memory";
+import {
+  CTRVFSAlreadyExistsError,
+  CTRVFSMissingFileError
+} from "#vfs/vfs-error";
 import type { Mode, MakeDirectoryOptions } from "node:fs";
 import { CTREventEmitter } from "#event-emitter/event-emitter";
 import { join, dirname, extname, resolve, basename } from "node:path";
@@ -448,6 +451,24 @@ class CTRVFSDirectory<
     return this._nodes[this.findIndex(predicate)];
   }
 
+  public read(path: string | string[], required: true): CTRMemory;
+  public read(path: string | string[], required?: boolean): null | CTRMemory;
+
+  public read(path: string | string[], required?: boolean): null | CTRMemory {
+    const node = this.search(path);
+
+    if (node === null || node.isDirectory()) {
+      if (required) {
+        path = Array.isArray(path) ? path.join("/") : path;
+        throw new CTRVFSMissingFileError(path, this);
+      }
+
+      return null;
+    }
+
+    return node.data;
+  }
+
   public clear(): this {
     this.nodes.forEach(
       (node) => ((<CTRVFSDirectory<D, F>>node)._parent = null)
@@ -616,7 +637,7 @@ class CTRVFSDirectory<
     const mode = options?.mode || (options?.merge ? "merge" : "fail");
 
     if (mode === "fail" && this.exists(node)) {
-      throw new CTRVFSError(CTRVFSError.ERR_ALREADY_EXISTS, node, this);
+      throw new CTRVFSAlreadyExistsError(node, this);
     }
 
     if (mode === "skip") {
@@ -687,7 +708,7 @@ class CTRVFSDirectory<
     }
 
     if (merge === "fail") {
-      throw new CTRVFSError(CTRVFSError.ERR_ALREADY_EXISTS, node, this);
+      throw new CTRVFSAlreadyExistsError(node, this);
     }
 
     if (merge === "skip") {

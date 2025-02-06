@@ -13,5 +13,10 @@ export type {
   CTRVFSDirectoryAppendOptions as DirectoryAppendOptions
 } from "#vfs/vfs";
 
-export { CTRVFSError as Error } from "#vfs/vfs-error";
+export {
+  CTRVFSError as Error,
+  CTRVFSMissingFileError as MissingFileError,
+  CTRVFSAlreadyExistsError as AlreadyExistsError
+} from "#vfs/vfs-error";
+
 export type { CTRVFSErrorCode as ErrorCode } from "#vfs/vfs-error";
